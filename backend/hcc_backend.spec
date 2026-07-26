@@ -28,6 +28,15 @@ for pkg in ("fastapi", "starlette", "pydantic", "pydantic_settings",
     datas += _d
     binaries += _b
 
+# THE FIX for "No module named 'app'".
+# main_desktop.py starts the server with uvicorn.run("app.main:app"), i.e. it
+# asks Python to import the package BY NAME at runtime.  Relying only on the
+# modules PyInstaller compiled into the archive was not enough on Windows, so
+# we also copy the whole app/ folder into the bundle as plain data files.
+# At runtime PyInstaller unpacks the bundle to a temp dir and puts that dir on
+# sys.path, so "app" is then findable as an ordinary package on disk.
+datas += [('app', 'app')]
+
 hiddenimports = [
     'uvicorn',
     'uvicorn.logging',
@@ -69,11 +78,16 @@ hiddenimports = [
 
 # Pull in EVERY module under app.* automatically so a newly-added router /
 # service / model can never be silently left out of the frozen build.
+# This is generated from the real folder contents, so it can never drift out of
+# sync with the code the way a hand-typed list would.
+hiddenimports += ['app', 'app.main', 'app.database']
 hiddenimports += collect_submodules('app')
 
 a = Analysis(
     ['main_desktop.py'],
-    pathex=['.'],
+    # './app' is here so PyInstaller can resolve "app" itself while analysing,
+    # even if it is invoked from somewhere other than the backend/ folder.
+    pathex=['.', './app'],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

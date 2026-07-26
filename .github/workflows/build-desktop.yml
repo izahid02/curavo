@@ -41,11 +41,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pyinstaller-hooks-contrib
 
+      # Must run from backend/ — the spec uses relative paths ('.', 'app')
+      # to locate the application package.  --clean throws away any cached
+      # analysis so a stale build can never mask a fix.
       - name: Build backend with PyInstaller
         working-directory: backend
         run: |
-          pyinstaller hcc_backend.spec
-          dir dist
+          pyinstaller hcc_backend.spec --clean
+          dir dist\
 
       # Tauri's sidecar mechanism looks for a binary named
       # <name>-<target-triple>[.exe] next to tauri.conf.json.  PyInstaller
