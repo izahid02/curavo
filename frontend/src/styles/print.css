@@ -1,0 +1,200 @@
+/*
+ * print.css — ON-SCREEN preview styles for the thermal receipt modal.
+ *
+ * The ACTUAL printing (80mm formatting, hiding the rest of the page) lives in
+ * thermal-print.css inside an @media print block. THIS file only styles how the
+ * receipt + modal chrome look on screen while the cashier previews it.
+ *
+ * IMPORTANT: every rule below is wrapped in `@media screen` so NONE of it
+ * applies while printing. That keeps the two stylesheets from fighting over
+ * the same #thermal-receipt element (bundle order is not guaranteed) — on
+ * paper, only thermal-print.css has a say.
+ *
+ * Flow: complete sale → this preview appears → click Print → window.print()
+ * applies thermal-print.css → browser print dialog → thermal printer.
+ *
+ * Layout note: the receipt (#thermal-receipt), the dark backdrop, and the
+ * action buttons are each rendered as DIRECT children of <body> (via a single
+ * React portal). That is what lets thermal-print.css print only the receipt.
+ * Because they are siblings (not nested), we position them with fixed here.
+ */
+
+@media screen {
+
+  /* ── Dark backdrop behind the preview ───────────────────────────────────── */
+  .thermal-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1000;
+  }
+
+  /* ── The receipt card (screen look — thermal-print.css owns the paper) ───── */
+  #thermal-receipt {
+    position: fixed;
+    top: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    max-height: calc(100vh - 150px);
+    overflow-y: auto;
+    z-index: 1001;
+    background: #fff;
+    color: #111;
+    padding: 20px 18px;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  #thermal-receipt .receipt-header { text-align: center; margin-bottom: 8px; }
+
+  #thermal-receipt .receipt-logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin: 0 auto 6px;
+    display: block;
+    border: 1.5px solid #e8e8e8;
+  }
+
+  #thermal-receipt .receipt-shop-name {
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+  }
+
+  #thermal-receipt .receipt-tagline { font-size: 10px; color: #555; margin-top: 2px; }
+
+  #thermal-receipt .receipt-divider {
+    border: none;
+    border-top: 1px dashed #999;
+    margin: 6px 0;
+  }
+
+  #thermal-receipt .receipt-meta { font-size: 11px; margin-bottom: 4px; }
+  #thermal-receipt .receipt-meta-row { display: flex; justify-content: space-between; }
+
+  #thermal-receipt .receipt-items {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin: 4px 0;
+  }
+  #thermal-receipt .receipt-items th {
+    text-align: left;
+    border-bottom: 1px solid #333;
+    padding: 3px 0;
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+  #thermal-receipt .receipt-items td { padding: 4px 0; vertical-align: top; }
+  #thermal-receipt .receipt-items .item-qty { text-align: center; }
+  #thermal-receipt .receipt-items .item-price,
+  #thermal-receipt .receipt-items .item-total { text-align: right; white-space: nowrap; }
+  #thermal-receipt .receipt-items .item-batch { font-size: 9px; color: #666; }
+
+  #thermal-receipt .receipt-totals { font-size: 11px; margin-top: 4px; }
+  #thermal-receipt .receipt-total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 0;
+  }
+  #thermal-receipt .receipt-grand-total {
+    font-size: 14px;
+    font-weight: bold;
+    border-top: 1px solid #222;
+    border-bottom: 1px double #222;
+    padding: 4px 0;
+    margin-top: 4px;
+  }
+
+  #thermal-receipt .receipt-payment {
+    font-size: 11px;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed #999;
+  }
+
+  #thermal-receipt .receipt-footer {
+    text-align: center;
+    font-size: 10px;
+    color: #555;
+    margin-top: 8px;
+    border-top: 1px dashed #999;
+    padding-top: 6px;
+    line-height: 1.6;
+  }
+
+  /* ── Action bar (Print / New Sale / Printer Setup) — floats below the card ─ */
+  .thermal-modal-actions {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1002;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  }
+
+  .thermal-modal-actions .success-flag {
+    font-size: 13px;
+    font-weight: 700;
+    color: #059669;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+
+  /* The (?) help icon with a hover tooltip on the Print button */
+  .print-help {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid #9ca3af;
+    color: #6b7280;
+    font-size: 11px;
+    cursor: help;
+    margin-left: 2px;
+  }
+
+  .print-help .print-help-tip {
+    position: absolute;
+    bottom: 130%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 240px;
+    padding: 10px 12px;
+    background: #1e1b4b;
+    color: #fff;
+    font-size: 11px;
+    line-height: 1.5;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
+    z-index: 1003;
+  }
+
+  .print-help:hover .print-help-tip {
+    opacity: 1;
+    visibility: visible;
+  }
+}

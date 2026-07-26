@@ -1,0 +1,173 @@
+/*
+ * thermal-print.css — PRINT-ONLY styles for the 80mm thermal receipt.
+ *
+ * Everything here lives inside @media print, so it has ZERO effect on the
+ * screen. When the user clicks "Print" we call window.print(); the browser
+ * then applies these rules and formats the receipt for a 3-inch (80mm)
+ * thermal printer.
+ *
+ * How the "print only the receipt" trick works:
+ *   - The <ThermalReceipt> element (id="thermal-receipt") is rendered as a
+ *     DIRECT child of <body> (via React createPortal). That matters.
+ *   - `body > * { display: none }` hides every direct child of body
+ *     (the app root #root, the dark modal backdrop, the action buttons…).
+ *   - `#thermal-receipt { display: block }` then re-shows ONLY the receipt.
+ *     An id selector out-ranks the `body > *` rule, so the receipt wins.
+ *
+ * The on-screen preview (dark backdrop + buttons + card look) is styled
+ * separately in print.css — this file never touches the screen.
+ */
+
+@media print {
+  /* Hide everything except the receipt */
+  body > * { display: none !important; }
+  #thermal-receipt { display: block !important; }
+
+  /* Page setup for 80mm thermal */
+  @page {
+    width: 80mm;
+    margin: 0;
+    padding: 0;
+  }
+
+  #thermal-receipt {
+    width: 80mm;
+    max-width: 80mm;
+    margin: 0;
+    padding: 4mm 4mm 8mm 4mm;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #000;
+    background: #fff;
+    /* On screen the preview is positioned/scrolled; reset that for paper. */
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* Header */
+  #thermal-receipt .receipt-header {
+    text-align: center;
+    margin-bottom: 6px;
+  }
+  #thermal-receipt .receipt-logo {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 4px;
+    display: block;
+  }
+  #thermal-receipt .receipt-shop-name {
+    font-size: 13px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  #thermal-receipt .receipt-tagline {
+    font-size: 9px;
+    margin-top: 2px;
+  }
+
+  /* Divider */
+  #thermal-receipt .receipt-divider {
+    border: none;
+    border-top: 1px dashed #000;
+    margin: 5px 0;
+  }
+
+  /* Invoice meta */
+  #thermal-receipt .receipt-meta {
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+  #thermal-receipt .receipt-meta-row {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Items table */
+  #thermal-receipt .receipt-items {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    margin: 4px 0;
+  }
+  #thermal-receipt .receipt-items th {
+    text-align: left;
+    border-bottom: 1px solid #000;
+    padding: 2px 0;
+    font-size: 9px;
+    text-transform: uppercase;
+  }
+  #thermal-receipt .receipt-items td {
+    padding: 3px 0;
+    vertical-align: top;
+  }
+  #thermal-receipt .receipt-items .item-name {
+    width: 45%;
+  }
+  #thermal-receipt .receipt-items .item-qty {
+    width: 10%;
+    text-align: center;
+  }
+  #thermal-receipt .receipt-items .item-price {
+    width: 20%;
+    text-align: right;
+  }
+  #thermal-receipt .receipt-items .item-total {
+    width: 25%;
+    text-align: right;
+  }
+  #thermal-receipt .receipt-items .item-batch {
+    font-size: 8px;
+    color: #444;
+  }
+
+  /* Totals */
+  #thermal-receipt .receipt-totals {
+    font-size: 10px;
+    margin-top: 4px;
+  }
+  #thermal-receipt .receipt-total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 0;
+  }
+  #thermal-receipt .receipt-grand-total {
+    font-size: 13px;
+    font-weight: bold;
+    border-top: 1px solid #000;
+    border-bottom: 1px double #000;
+    padding: 3px 0;
+    margin-top: 3px;
+  }
+
+  /* Payment */
+  #thermal-receipt .receipt-payment {
+    font-size: 10px;
+    margin-top: 4px;
+    padding: 3px 0;
+    border-top: 1px dashed #000;
+  }
+
+  /* Footer */
+  #thermal-receipt .receipt-footer {
+    text-align: center;
+    font-size: 9px;
+    margin-top: 6px;
+    border-top: 1px dashed #000;
+    padding-top: 4px;
+  }
+
+  /* Hide screen-only elements */
+  #thermal-receipt .screen-only { display: none !important; }
+
+  /* Hide print and new sale buttons */
+  .print-actions { display: none !important; }
+}

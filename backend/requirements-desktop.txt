@@ -1,0 +1,15 @@
+# Desktop / frozen-build dependencies.
+#
+# This installs everything the running app needs (via -r requirements.txt)
+# PLUS the PyInstaller tooling used to freeze the backend into hcc-backend.exe.
+# Keeping the runtime deps in one file (requirements.txt) means we never have
+# to keep two lists in sync.
+#
+# Usage (CI or local):
+#   pip install -r requirements-desktop.txt
+
+-r requirements.txt
+
+# --- Freezing toolchain (build-time only, not shipped inside the exe) -------
+pyinstaller>=6.0
+pyinstaller-hooks-contrib>=2024.0

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Outer circle ring (thin, dark green) -->
+  <circle cx="60" cy="60" r="54" stroke="#1a6b3c" stroke-width="2.5" fill="none" opacity="0.15"/>
+  <!-- Medical cross — dark green -->
+  <rect x="47" y="22" width="26" height="76" rx="5" fill="#1a6b3c"/>
+  <rect x="22" y="47" width="76" height="26" rx="5" fill="#1a6b3c"/>
+  <!-- Flowing ribbon — two lime/light-green overlapping curves that cross diagonally through the cross -->
+  <path d="M28 75 Q45 55 60 60 Q75 65 92 45" stroke="#6fcf3d" stroke-width="11" stroke-linecap="round" fill="none" opacity="0.85"/>
+  <path d="M28 78 Q45 58 60 63 Q75 68 92 48" stroke="#8fe855" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.5"/>
+  <!-- Small cross highlight (white, subtle) -->
+  <rect x="47" y="22" width="26" height="76" rx="5" fill="white" opacity="0.08"/>
+</svg>

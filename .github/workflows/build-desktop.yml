@@ -1,0 +1,124 @@
+name: Build HCC Desktop App
+
+# Runs when you push a version tag (e.g. v0.1.0-beta) or trigger it by hand
+# from the Actions tab.  Produces a Windows .exe installer.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 0.1.0-beta)'
+        required: true
+        default: '0.1.0-beta'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- Backend: freeze FastAPI into hcc-backend.exe with PyInstaller -----
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pyinstaller-hooks-contrib
+
+      - name: Build backend with PyInstaller
+        working-directory: backend
+        run: |
+          pyinstaller hcc_backend.spec
+          dir dist
+
+      # Tauri's sidecar mechanism looks for a binary named
+      # <name>-<target-triple>[.exe] next to tauri.conf.json.  PyInstaller
+      # produces plain "hcc-backend.exe", so copy+rename it into src-tauri.
+      - name: Stage backend as Tauri sidecar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path frontend/src-tauri | Out-Null
+          Copy-Item backend/dist/hcc-backend.exe `
+            frontend/src-tauri/hcc-backend-x86_64-pc-windows-msvc.exe -Force
+          Get-ChildItem frontend/src-tauri/hcc-backend-*.exe
+
+      # --- Frontend + Tauri --------------------------------------------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Cache Rust build artifacts so re-runs are much faster.
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Build Tauri app (Windows installer)
+        working-directory: frontend
+        env:
+          # No code-signing key for the beta — Tauri skips the signing step.
+          TAURI_SIGNING_PRIVATE_KEY: ''
+        run: npx tauri build --target x86_64-pc-windows-msvc
+
+      # --- Publish -----------------------------------------------------------
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: HCC-ERP-Windows-${{ github.ref_name }}
+          path: |
+            frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: HCC Pharmacy ERP ${{ github.ref_name }}
+          body: |
+            ## Health Care Centre ERP ${{ github.ref_name }}
+
+            ### Installation
+            1. Download the .exe installer below
+            2. Double-click to install
+            3. Launch from the Start Menu shortcut
+
+            ### What's included
+            - Complete pharmacy billing & POS
+            - Inventory management
+            - Patient records
+            - Credit management
+            - Supplier management
+            - Expenditure & payroll
+            - Automated follow-ups
+            - Barcode scanner support
+            - Thermal printer support (80mm)
+
+            ### Requirements
+            - Windows 10 or Windows 11
+            - 4GB RAM minimum
+            - 500MB disk space
+
+            Powered by ARZ Technologies
+          files: |
+            frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') }}

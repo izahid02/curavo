@@ -1,0 +1,119 @@
+# -*- mode: python ; coding: utf-8 -*-
+#
+# PyInstaller build recipe for the HCC ERP backend.
+#
+# Build it with:   pyinstaller hcc_backend.spec
+# Output:          dist/hcc-backend.exe   (on Windows / GitHub Actions)
+#                  dist/hcc-backend       (on macOS/Linux, for local testing)
+#
+# The frozen exe is launched by Tauri as a "sidecar" (see src-tauri/src/main.rs).
+# It runs main_desktop.py, which starts uvicorn on a free port.
+
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+block_cipher = None
+
+# ---------------------------------------------------------------------------
+# Data files / binaries / hidden imports
+# ---------------------------------------------------------------------------
+datas = []
+binaries = []
+
+# collect_all pulls in package metadata + data files that these libraries load
+# at runtime via importlib.metadata (a classic source of "works in dev, breaks
+# when frozen" bugs).  We extend datas/binaries/hiddenimports from each.
+for pkg in ("fastapi", "starlette", "pydantic", "pydantic_settings",
+            "uvicorn", "sqlalchemy", "jose", "bcrypt"):
+    _d, _b, _h = collect_all(pkg)
+    datas += _d
+    binaries += _b
+
+hiddenimports = [
+    'uvicorn',
+    'uvicorn.logging',
+    'uvicorn.loops',
+    'uvicorn.loops.auto',
+    'uvicorn.loops.asyncio',
+    'uvicorn.protocols',
+    'uvicorn.protocols.http',
+    'uvicorn.protocols.http.auto',
+    'uvicorn.protocols.http.h11_impl',
+    'uvicorn.protocols.websockets',
+    'uvicorn.protocols.websockets.auto',
+    'uvicorn.lifespan',
+    'uvicorn.lifespan.on',
+    'uvicorn.main',
+    'sqlalchemy.dialects.sqlite',
+    'sqlalchemy.sql.default_comparator',
+    'sqlalchemy.ext.declarative',
+    'fastapi',
+    'fastapi.middleware',
+    'fastapi.middleware.cors',
+    'starlette',
+    'starlette.middleware',
+    'pydantic',
+    'pydantic.v1',
+    'bcrypt',
+    'jose',
+    'jose.jwt',
+    'jose.exceptions',
+    'multipart',
+    'aiofiles',
+    'h11',
+    'anyio',
+    'anyio.abc',
+    'anyio._backends._asyncio',
+    'email_validator',
+    'httpx',
+]
+
+# Pull in EVERY module under app.* automatically so a newly-added router /
+# service / model can never be silently left out of the frozen build.
+hiddenimports += collect_submodules('app')
+
+a = Analysis(
+    ['main_desktop.py'],
+    pathex=['.'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'tkinter', 'matplotlib', 'numpy', 'pandas',
+        'PIL', 'cv2', 'torch', 'tensorflow',
+        'IPython', 'jupyter', 'notebook',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='hcc-backend',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    # console=False → no black terminal window pops up behind the Tauri
+    # window on Windows.  Errors still go to the rotating hcc.log file.
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)

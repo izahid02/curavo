@@ -1,0 +1,32 @@
+[package]
+name = "hcc-erp"
+version = "0.1.0"
+edition = "2021"
+description = "Health Care Centre ERP desktop shell"
+authors = ["ARZ Technologies"]
+
+# The Tauri build script (build.rs) generates code from tauri.conf.json at
+# compile time.  Without tauri-build here, build.rs cannot compile.
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+# blocking + json only; we poll http://127.0.0.1 so no TLS is strictly needed,
+# but keeping default features lets reqwest use the OS TLS (schannel on
+# Windows) with zero extra system dependencies in CI.
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+incremental = true
