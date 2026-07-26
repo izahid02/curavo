@@ -17,6 +17,13 @@ jobs:
   build-windows:
     runs-on: windows-latest
 
+    # The default GITHUB_TOKEN is read-only.  Creating a Release writes to the
+    # repository, so the job must ask for write access to repo contents —
+    # otherwise the release step fails with
+    # "Resource not accessible by integration".
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,7 +62,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install frontend dependencies
         working-directory: frontend
