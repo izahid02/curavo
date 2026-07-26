@@ -113,10 +113,23 @@ if __name__ == "__main__":
 
     import uvicorn  # imported here so it is available when frozen
 
+    # Import the FastAPI app OBJECT rather than passing uvicorn the string
+    # "app.main:app".  A string makes uvicorn look the module up by name at
+    # runtime, which PyInstaller cannot trace while analysing the code — that
+    # is what produced "No module named 'app'" in the frozen Windows build.
+    # A real import statement is visible to PyInstaller, so the module is
+    # guaranteed to be baked into the exe.
+    #
+    # NOTE: this import MUST stay below the HCC_DATA_DIR line above.
+    # app/database.py reads that environment variable at import time to decide
+    # where pharmacy.db lives; importing any earlier would point the desktop
+    # build at the wrong folder.
+    from app.main import app as fastapi_app
+
     uvicorn.run(
-        "app.main:app",   # module path to the FastAPI application object
+        fastapi_app,
         host="127.0.0.1",
         port=port,
-        log_level="info",
+        log_level="warning",
         access_log=False,  # keep the log file clean in production
     )
