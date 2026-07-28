@@ -60,14 +60,29 @@ export default function App() {
     }
 
     let unlisten;
+
+    // Last-resort escape hatch.  If the "backend-ready" event never arrives
+    // (Rust crashed, the event was lost, the port file was unreadable), show
+    // the app anyway after 30s.  A login screen that reports a connection
+    // error is far more useful to the user than a splash that spins forever —
+    // at least they can read the message and restart.
+    const fallbackTimer = setTimeout(() => {
+      console.warn('backend-ready not received in 30s — continuing anyway');
+      setBackendReady(true);
+    }, 30000);
+
     import('@tauri-apps/api/event').then(({ listen }) => {
-      listen('backend-ready', () => setBackendReady(true)).then((fn) => {
+      listen('backend-ready', () => {
+        clearTimeout(fallbackTimer);
+        setBackendReady(true);
+      }).then((fn) => {
         unlisten = fn;
       });
     });
 
     return () => {
       if (unlisten) unlisten();
+      clearTimeout(fallbackTimer);
     };
   }, []);
 

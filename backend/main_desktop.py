@@ -96,7 +96,14 @@ if __name__ == "__main__":
     # endpoint inside app/main.py can return it to health-check callers.
     os.environ["HCC_PORT"] = str(port)
 
-    logging.info(f"HCC backend starting on port {port}")
+    # Startup diagnostics.  When the frozen .exe misbehaves on a user's Windows
+    # PC these four lines are usually enough to tell whether Python started at
+    # all, whether it picked the right data folder, and which port it chose.
+    logging.info(f"Python version: {sys.version}")
+    logging.info(f"Frozen: {getattr(sys, 'frozen', False)}")
+    logging.info(f"App data dir: {app_dir}")
+    logging.info(f"Database file will be: {app_dir / 'pharmacy.db'}")
+    logging.info(f"Starting uvicorn on port {port}")
 
     # Graceful shutdown when Tauri sends SIGTERM (e.g. user closes the window)
     def _shutdown(sig, frame):
@@ -130,6 +137,9 @@ if __name__ == "__main__":
         fastapi_app,
         host="127.0.0.1",
         port=port,
-        log_level="warning",
+        # "info" (not "warning") while we are diagnosing desktop startup —
+        # this is what puts uvicorn's own "Application startup complete" line
+        # into hcc.log, which proves the server actually finished booting.
+        log_level="info",
         access_log=False,  # keep the log file clean in production
     )
