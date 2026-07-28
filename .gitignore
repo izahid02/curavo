@@ -1,0 +1,45 @@
+# Files git should never track.
+#
+# Everything here is either GENERATED (rebuilt by a tool from source) or
+# MACHINE-SPECIFIC (secrets, OS junk).  Committing generated files makes every
+# build show up as a huge meaningless diff and causes merge conflicts in files
+# nobody edits by hand.
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+backend/dist/
+backend/build/
+backend/*.spec.bak
+
+# The Python virtual environment — hundreds of MB, rebuilt from
+# requirements.txt with `pip install -r requirements.txt`.
+backend/venv/
+
+# --- Frontend build output -------------------------------------------------
+# GitHub Actions regenerates frontend/dist via `npm run build`
+# (tauri.conf.json → build.beforeBuildCommand), so it never needs committing.
+frontend/dist/
+frontend/node_modules/
+
+# --- Tauri / Rust build output ---------------------------------------------
+frontend/src-tauri/target/
+
+# The staged sidecar binary: a ~40 MB copy of the PyInstaller exe that the
+# workflow creates fresh on every run.
+frontend/src-tauri/hcc-backend-*
+
+# --- Environment / secrets -------------------------------------------------
+# .env holds SECRET_KEY (the JWT signing key). Only .env.example — which has
+# placeholder values — belongs in the repository.
+.env
+*.env.local
+
+# --- OS junk ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# --- Logs and the local database -------------------------------------------
+*.log
+*.db
