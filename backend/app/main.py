@@ -55,6 +55,9 @@ def _seed_admin() -> None:
     Credentials:  username = admin   password = admin123
     The owner should change the password after the first login.
     """
+    import logging
+    import traceback
+
     db = SessionLocal()
     try:
         # Import here (inside the function) to avoid any import-order issues
@@ -63,6 +66,7 @@ def _seed_admin() -> None:
         from app.services.auth_service import hash_password
 
         if db.query(User).count() > 0:
+            logging.info("Admin seed: users already exist — skipping")
             return  # Users already exist — nothing to do
 
         # The "Owner" role should already exist from the schema.sql seed data.
@@ -82,11 +86,17 @@ def _seed_admin() -> None:
         )
         db.add(admin)
         db.commit()
+        # logging (not print): in the frozen Windows build the .exe is built
+        # with console=False, so print() output has nowhere to go — only the
+        # rotating hcc.log file is readable after the fact.
+        logging.info("Default admin user created (username: admin  password: admin123)")
+        logging.info("Change this password before going live.")
         print("✅ Default admin user created  (username: admin  password: admin123)")
         print("   ⚠️  Change this password before going live.")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not create admin user on startup: {exc}")
+        logging.error(f"Could not create admin user on startup: {exc}")
+        logging.error(traceback.format_exc())
     finally:
         db.close()
 
@@ -180,84 +190,42 @@ def _run_db_migrations() -> None:
     Phase 3.3 additions:
       products.days_per_unit              — pharmacist override for refill calc
       invoice_items.estimated_finish_date — predicted supply run-out date
-    """
-    db = SessionLocal()
-    try:
-        # Wrap each column addition separately — SQLite raises an error if the
-        # column already exists (unlike PostgreSQL's IF NOT EXISTS), so we
-        # catch and ignore that specific error for each column independently.
-        try:
-            db.execute(text("ALTER TABLE products ADD COLUMN days_per_unit INTEGER"))
-            db.commit()
-        except Exception:
-            db.rollback()  # column already exists — safe to ignore
 
-        try:
-            db.execute(text("ALTER TABLE invoice_items ADD COLUMN estimated_finish_date DATE"))
-            db.commit()
-        except Exception:
-            db.rollback()  # column already exists — safe to ignore
+    Windows note: the SQLite build shipped inside the frozen .exe can report a
+    different error type/message for "duplicate column name" than the macOS
+    system SQLite does.  So we catch a BARE Exception per statement and log it
+    rather than matching on the message — an unexpected error here must never
+    take the whole backend down.
+    """
+    import logging
+
+    # Every incremental column addition, in one ordered list.  Each statement
+    # runs in its own try/except below, so one failure never blocks the rest.
+    migrations = [
+        # Phase 3.3 refill prediction
+        "ALTER TABLE products ADD COLUMN days_per_unit INTEGER",
+        "ALTER TABLE invoice_items ADD COLUMN estimated_finish_date DATE",
 
         # Phase 3 credit management: amount_paid and credit_amount on invoices
-        for stmt in [
-            "ALTER TABLE invoices ADD COLUMN amount_paid NUMERIC(12,2) DEFAULT 0",
-            "ALTER TABLE invoices ADD COLUMN credit_amount NUMERIC(12,2) DEFAULT 0",
-            "ALTER TABLE invoices ADD COLUMN credit_due_date DATE",
-        ]:
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()
+        "ALTER TABLE invoices ADD COLUMN amount_paid NUMERIC(12,2) DEFAULT 0",
+        "ALTER TABLE invoices ADD COLUMN credit_amount NUMERIC(12,2) DEFAULT 0",
+        "ALTER TABLE invoices ADD COLUMN credit_due_date DATE",
 
         # Phase 3 follow-up template improvements
-        for stmt in [
-            "ALTER TABLE message_templates ADD COLUMN day INTEGER",
-            "ALTER TABLE message_templates ADD COLUMN tag_filter VARCHAR(60)",
-            "ALTER TABLE message_templates ADD COLUMN is_active INTEGER DEFAULT 1",
-            "ALTER TABLE follow_up_schedules ADD COLUMN sent_at TIMESTAMPTZ",
-        ]:
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()  # column already exists — safe to ignore
+        "ALTER TABLE message_templates ADD COLUMN day INTEGER",
+        "ALTER TABLE message_templates ADD COLUMN tag_filter VARCHAR(60)",
+        "ALTER TABLE message_templates ADD COLUMN is_active INTEGER DEFAULT 1",
+        "ALTER TABLE follow_up_schedules ADD COLUMN sent_at TIMESTAMPTZ",
 
-        # Credit: how a repayment was received (CASH / UPI) on PAYMENT rows
-        try:
-            db.execute(text("ALTER TABLE credit_transactions ADD COLUMN payment_mode TEXT"))
-            db.commit()
-        except Exception:
-            db.rollback()  # column already exists — safe to ignore
-
-        # Credit: permanent "was late at some point" marker for defaulter history
-        try:
-            db.execute(text(
-                "ALTER TABLE credit_transactions ADD COLUMN was_overdue INTEGER DEFAULT 0"
-            ))
-            db.commit()
-            # Backfill: anything sitting in OVERDUE right now is, by definition,
-            # already late — mark it so day-one data is not silently wrong.
-            # Transactions that were late but have since been paid cannot be
-            # recovered (the status was overwritten), so history starts here.
-            db.execute(text(
-                "UPDATE credit_transactions SET was_overdue = 1 WHERE status = 'OVERDUE'"
-            ))
-            db.commit()
-        except Exception:
-            db.rollback()  # column already exists — safe to ignore
+        # Credit: how a repayment was received (CASH / UPI) on PAYMENT rows,
+        # and a permanent "was late at some point" marker for defaulter history
+        "ALTER TABLE credit_transactions ADD COLUMN payment_mode TEXT",
+        "ALTER TABLE credit_transactions ADD COLUMN was_overdue INTEGER DEFAULT 0",
 
         # Account menu: profile contact details + avatar photo on users
-        for stmt in [
-            "ALTER TABLE users ADD COLUMN email TEXT",
-            "ALTER TABLE users ADD COLUMN phone TEXT",
-            "ALTER TABLE users ADD COLUMN avatar_path TEXT",
-        ]:
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()  # column already exists — safe to ignore
+        "ALTER TABLE users ADD COLUMN email TEXT",
+        "ALTER TABLE users ADD COLUMN phone TEXT",
+        "ALTER TABLE users ADD COLUMN avatar_path TEXT",
 
         # Strip/unit medicine management (Feature 3).
         #
@@ -265,32 +233,18 @@ def _run_db_migrations() -> None:
         # individual tablets.  Stock is ALWAYS stored in individual units;
         # units_per_strip is what lets the UI show "15 strips (150 units)"
         # and lets billing price a sale either way.
-        for stmt in [
-            "ALTER TABLE products ADD COLUMN medicine_type TEXT DEFAULT 'TABLET'",
-            "ALTER TABLE products ADD COLUMN is_strip INTEGER DEFAULT 0",
-            "ALTER TABLE products ADD COLUMN units_per_strip INTEGER",
-            "ALTER TABLE products ADD COLUMN strip_mrp NUMERIC(10,2)",
-            "ALTER TABLE products ADD COLUMN unit_mrp NUMERIC(10,2)",
-        ]:
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()  # column already exists — safe to ignore
+        "ALTER TABLE products ADD COLUMN medicine_type TEXT DEFAULT 'TABLET'",
+        "ALTER TABLE products ADD COLUMN is_strip INTEGER DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN units_per_strip INTEGER",
+        "ALTER TABLE products ADD COLUMN strip_mrp NUMERIC(10,2)",
+        "ALTER TABLE products ADD COLUMN unit_mrp NUMERIC(10,2)",
 
         # Home visit / drip administration charge on an invoice (Feature 4).
         # Stored on the invoice itself rather than as an invoice_item, because
         # it is a SERVICE charge: it has no batch, no stock movement, and — by
         # design — no GST.
-        for stmt in [
-            "ALTER TABLE invoices ADD COLUMN home_visit_charge NUMERIC(12,2) DEFAULT 0",
-            "ALTER TABLE invoices ADD COLUMN home_visit_notes TEXT",
-        ]:
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()  # column already exists — safe to ignore
+        "ALTER TABLE invoices ADD COLUMN home_visit_charge NUMERIC(12,2) DEFAULT 0",
+        "ALTER TABLE invoices ADD COLUMN home_visit_notes TEXT",
 
         # Bonus / scheme purchase (Feature B).
         #
@@ -299,25 +253,59 @@ def _run_db_migrations() -> None:
         # a later return values only the PAID units), on the stock purchase (so
         # Purchase History can show "50 paid + 10 bonus = 60 total"), and on the
         # supplier return (so the paid/bonus split is snapshotted at return time).
-        for stmt in [
-            "ALTER TABLE batches ADD COLUMN scheme_buy INTEGER",
-            "ALTER TABLE batches ADD COLUMN scheme_free INTEGER",
-            "ALTER TABLE batches ADD COLUMN scheme_label TEXT",
-            "ALTER TABLE batches ADD COLUMN bonus_quantity INTEGER DEFAULT 0",
-            "ALTER TABLE batches ADD COLUMN paid_quantity INTEGER",
-            "ALTER TABLE batches ADD COLUMN effective_cost_per_unit NUMERIC(10,2)",
-            "ALTER TABLE stock_purchases ADD COLUMN scheme_label TEXT",
-            "ALTER TABLE stock_purchases ADD COLUMN bonus_quantity INTEGER DEFAULT 0",
-            "ALTER TABLE supplier_returns ADD COLUMN scheme_label TEXT",
-            "ALTER TABLE supplier_returns ADD COLUMN bonus_returned INTEGER DEFAULT 0",
-            "ALTER TABLE supplier_returns ADD COLUMN paid_returned INTEGER",
-        ]:
-            try:
-                db.execute(text(stmt))
-                db.commit()
-            except Exception:
-                db.rollback()  # column already exists — safe to ignore
+        "ALTER TABLE batches ADD COLUMN scheme_buy INTEGER",
+        "ALTER TABLE batches ADD COLUMN scheme_free INTEGER",
+        "ALTER TABLE batches ADD COLUMN scheme_label TEXT",
+        "ALTER TABLE batches ADD COLUMN bonus_quantity INTEGER DEFAULT 0",
+        "ALTER TABLE batches ADD COLUMN paid_quantity INTEGER",
+        "ALTER TABLE batches ADD COLUMN effective_cost_per_unit NUMERIC(10,2)",
+        "ALTER TABLE stock_purchases ADD COLUMN scheme_label TEXT",
+        "ALTER TABLE stock_purchases ADD COLUMN bonus_quantity INTEGER DEFAULT 0",
+        "ALTER TABLE supplier_returns ADD COLUMN scheme_label TEXT",
+        "ALTER TABLE supplier_returns ADD COLUMN bonus_returned INTEGER DEFAULT 0",
+        "ALTER TABLE supplier_returns ADD COLUMN paid_returned INTEGER",
+    ]
 
+    db = SessionLocal()
+    try:
+        applied = 0
+        for sql in migrations:
+            try:
+                db.execute(text(sql))
+                db.commit()
+                applied += 1
+                logging.info(f"Migration applied: {sql[:60]}")
+            except Exception as e:
+                # Almost always "duplicate column name" — the column is already
+                # there, which is the normal case on every restart after the
+                # first.  We log at INFO (not ERROR) so hcc.log stays readable,
+                # but we DO log the message: if a migration ever fails for a
+                # real reason on Windows, this line is the only evidence.
+                db.rollback()
+                # Only the first line of the exception — SQLAlchemy's full
+                # message spans three lines per statement, which would bury
+                # the rest of the startup trace in 100 lines of noise.
+                reason = str(e).splitlines()[0]
+                logging.info(f"Migration skipped (already applied): {sql[:50]}... {reason}")
+
+        # Backfill for was_overdue: anything sitting in OVERDUE right now is, by
+        # definition, already late — mark it so day-one data is not silently
+        # wrong.  Transactions that were late but have since been paid cannot be
+        # recovered (the status was overwritten), so history starts here.
+        # Safe to re-run: it only ever sets rows that are currently OVERDUE.
+        try:
+            db.execute(text(
+                "UPDATE credit_transactions SET was_overdue = 1 WHERE status = 'OVERDUE'"
+            ))
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logging.info(f"was_overdue backfill skipped: {e}")
+
+        logging.info(
+            f"Migrations complete: {applied} applied, "
+            f"{len(migrations) - applied} skipped"
+        )
     finally:
         db.close()
 
@@ -722,16 +710,50 @@ async def lifespan(_app: FastAPI):
       4. background tasks — start daily credit reminder scheduler
     """
     import asyncio
-    init_db()            # create all tables from ORM models (no-op if they exist)
-    _run_db_migrations()
-    _seed_admin()
-    _update_admin_details()
-    _seed_tags()
-    _seed_doctors()
-    _seed_message_templates()
-    _seed_drug_interactions()
-    # _seed_expenditure_demo()  # disabled — no longer seeds demo employees/expenses on startup
-    _seed_home_visit_charge()
+    import logging
+    import traceback
+
+    # init_db() is the single most likely place for the desktop build to die:
+    # it imports every ORM model and issues CREATE TABLE against the SQLite
+    # file in AppData.  If the folder is not writable, or a model import
+    # fails inside the frozen exe, we want the reason in hcc.log — not a
+    # silent exit.  We re-raise so startup fails loudly rather than serving a
+    # half-initialised app.
+    try:
+        init_db()        # create all tables from ORM models (no-op if they exist)
+        logging.info("Database initialized successfully")
+    except Exception as e:
+        logging.error(f"Database init failed: {e}")
+        logging.error(traceback.format_exc())
+        raise            # re-raise so startup fails loudly
+
+    # Each remaining startup step is logged individually.  If the app ever dies
+    # mid-startup again, the LAST line in hcc.log tells us exactly which step
+    # was running — that is the whole point of this trace.
+    steps = [
+        ("run_db_migrations",     _run_db_migrations),
+        ("seed_admin",            _seed_admin),
+        ("update_admin_details",  _update_admin_details),
+        ("seed_tags",             _seed_tags),
+        ("seed_doctors",          _seed_doctors),
+        ("seed_message_templates", _seed_message_templates),
+        ("seed_drug_interactions", _seed_drug_interactions),
+        # ("seed_expenditure_demo", _seed_expenditure_demo),  # disabled — no demo data
+        ("seed_home_visit_charge", _seed_home_visit_charge),
+    ]
+    for name, step in steps:
+        try:
+            logging.info(f"Startup step: {name}...")
+            step()
+            logging.info(f"Startup step: {name} OK")
+        except Exception as e:
+            # Seeding default rows is convenience, not correctness — a failure
+            # here must never stop the pharmacy from opening the app, so we log
+            # and continue instead of re-raising (unlike init_db above).
+            logging.error(f"Startup step '{name}' failed: {e}")
+            logging.error(traceback.format_exc())
+
+    logging.info("All startup steps complete — application is ready")
 
     # Start the credit reminder background task
     task = asyncio.create_task(_daily_credit_reminders_task())

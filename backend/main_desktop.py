@@ -86,6 +86,27 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    # ---------------------------------------------------------------------
+    # Windows safety net: give the process a usable stdout/stderr.
+    #
+    # hcc_backend.spec builds with console=False (no black terminal window).
+    # In that "windowed" mode PyInstaller leaves sys.stdout and sys.stderr as
+    # None, so ANY print() or library write to them raises AttributeError —
+    # and because that happens before our own logging is involved, the process
+    # dies without writing a single line to hcc.log.  That is exactly the
+    # "starts, then nothing" symptom we are chasing.
+    #
+    # Pointing both at the log file (UTF-8) means stray output is captured
+    # instead of fatal.  UTF-8 also matters because several startup messages
+    # contain emoji / Assamese text, which the Windows default cp1252 console
+    # encoding cannot encode (UnicodeEncodeError).
+    _console_log = open(app_dir / "hcc_console.log", "a", encoding="utf-8",
+                        errors="replace", buffering=1)
+    if sys.stdout is None:
+        sys.stdout = _console_log
+    if sys.stderr is None:
+        sys.stderr = _console_log
+
     port = find_free_port(8000)
 
     # Write the chosen port to a file so the Tauri frontend can read it
@@ -120,26 +141,52 @@ if __name__ == "__main__":
 
     import uvicorn  # imported here so it is available when frozen
 
-    # Import the FastAPI app OBJECT rather than passing uvicorn the string
-    # "app.main:app".  A string makes uvicorn look the module up by name at
-    # runtime, which PyInstaller cannot trace while analysing the code — that
-    # is what produced "No module named 'app'" in the frozen Windows build.
-    # A real import statement is visible to PyInstaller, so the module is
-    # guaranteed to be baked into the exe.
-    #
-    # NOTE: this import MUST stay below the HCC_DATA_DIR line above.
-    # app/database.py reads that environment variable at import time to decide
-    # where pharmacy.db lives; importing any earlier would point the desktop
-    # build at the wrong folder.
-    from app.main import app as fastapi_app
+    # Everything below is wrapped so that a failure during import or startup
+    # lands in hcc.log with a full traceback, instead of the process vanishing
+    # silently (which is what "Starting uvicorn on port 8000 … then nothing"
+    # in the Windows log means).
+    try:
+        # Import the FastAPI app OBJECT rather than passing uvicorn the string
+        # "app.main:app".  A string makes uvicorn look the module up by name at
+        # runtime, which PyInstaller cannot trace while analysing the code —
+        # that is what produced "No module named 'app'" in the frozen Windows
+        # build.  A real import statement is visible to PyInstaller, so the
+        # module is guaranteed to be baked into the exe.
+        #
+        # NOTE: this import MUST stay below the HCC_DATA_DIR line above.
+        # app/database.py reads that environment variable at import time to
+        # decide where pharmacy.db lives; importing any earlier would point the
+        # desktop build at the wrong folder.
+        logging.info("Importing FastAPI app...")
+        from app.main import app as fastapi_app
+        logging.info("FastAPI app imported successfully")
 
-    uvicorn.run(
-        fastapi_app,
-        host="127.0.0.1",
-        port=port,
-        # "info" (not "warning") while we are diagnosing desktop startup —
-        # this is what puts uvicorn's own "Application startup complete" line
-        # into hcc.log, which proves the server actually finished booting.
-        log_level="info",
-        access_log=False,  # keep the log file clean in production
-    )
+        logging.info("Starting uvicorn...")
+        uvicorn.run(
+            fastapi_app,
+            host="127.0.0.1",
+            port=port,
+            # "info" (not "warning") while we are diagnosing desktop startup —
+            # this is what puts uvicorn's own "Application startup complete"
+            # line into hcc.log, which proves the server finished booting.
+            log_level="info",
+            access_log=True,  # temporarily on while diagnosing startup
+            # log_config=None tells uvicorn NOT to install its own logging
+            # handlers.  Its default config writes to sys.stdout, which is a
+            # dead end in a console=False Windows build — that is why uvicorn's
+            # own "Application startup failed" traceback never reached hcc.log.
+            # With no config of its own, uvicorn's loggers propagate up to the
+            # root logger configured above, so everything lands in hcc.log.
+            log_config=None,
+        )
+        # Reaching here means uvicorn shut down normally (or refused to serve).
+        logging.info("uvicorn.run() returned — server has stopped")
+    except Exception as e:
+        import traceback
+        logging.error(f"FATAL ERROR during startup: {e}")
+        logging.error(traceback.format_exc())
+        # Keep the process alive briefly so the log handler can flush to disk
+        # before Windows tears the process down.
+        import time
+        time.sleep(5)
+        sys.exit(1)
