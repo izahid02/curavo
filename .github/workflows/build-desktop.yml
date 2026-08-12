@@ -98,6 +98,18 @@ jobs:
             frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
           retention-days: 30
 
+      # The Release step talks to the GitHub API, which is the one part of this
+      # job that depends on a service outside the runner.  When it is slow or
+      # rate-limiting, the action retries internally and eventually gives up
+      # with "Too many retries" — after burning a lot of wall-clock time.
+      #
+      # Two guards, doing different jobs:
+      #   timeout-minutes: 5   → stop waiting instead of hanging the job
+      #   continue-on-error    → a failed release does NOT fail the build
+      # The installer is already saved by the "Upload Windows installer" step
+      # above, so even with no Release published the .exe is still downloadable
+      # from the run's Artifacts section.  Losing the Release is an
+      # inconvenience; losing the build is not acceptable.
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -105,30 +117,12 @@ jobs:
           name: HCC Pharmacy ERP ${{ github.ref_name }}
           body: |
             ## Health Care Centre ERP ${{ github.ref_name }}
-
-            ### Installation
-            1. Download the .exe installer below
-            2. Double-click to install
-            3. Launch from the Start Menu shortcut
-
-            ### What's included
-            - Complete pharmacy billing & POS
-            - Inventory management
-            - Patient records
-            - Credit management
-            - Supplier management
-            - Expenditure & payroll
-            - Automated follow-ups
-            - Barcode scanner support
-            - Thermal printer support (80mm)
-
-            ### Requirements
-            - Windows 10 or Windows 11
-            - 4GB RAM minimum
-            - 500MB disk space
-
+            Download the installer below and run on Windows 10/11.
             Powered by ARZ Technologies
           files: |
             frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
           draft: false
           prerelease: ${{ contains(github.ref_name, 'beta') }}
+          fail_on_unmatched_files: false
+        timeout-minutes: 5
+        continue-on-error: true
