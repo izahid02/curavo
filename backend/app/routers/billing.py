@@ -13,7 +13,7 @@ Endpoints:
   GET  /invoices/{number}        — full invoice detail by invoice_number
   POST /invoices/{number}/return — process an invoice return
 """
-from datetime import date, datetime, time
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -26,7 +26,12 @@ from app.models.inventory import Batch, Product
 from app.models.opd import Doctor, OPDVisit
 from app.models.patients import Patient
 from app.models.user import User
-from app.utils.dates import get_today_ist, ist_day_bounds_utc
+from app.utils.dates import (
+    INVOICE_PERIODS,
+    get_today_ist,
+    ist_day_bounds_utc,
+    period_bounds_utc,
+)
 from app.schemas.billing import (
     BillingProductOut,
     CreateInvoiceRequest,
@@ -72,9 +77,12 @@ def _build_invoice_out(invoice: Invoice) -> InvoiceOut:
         gst_amt = (line_total * item.gst_rate / (Decimal("100") + item.gst_rate)).quantize(Decimal("0.01"))
         taxable = (line_total - gst_amt).quantize(Decimal("0.01"))
         items.append(InvoiceItemOut(
+            id=item.id,
             product_name=item.product.name,
             batch_number=item.batch.batch_number,
             quantity=item.quantity,
+            returned_qty=item.returned_qty or 0,
+            is_returned=bool(item.is_returned),
             unit_price=item.unit_price,
             purchase_price=item.purchase_price,
             gst_rate=item.gst_rate,
@@ -296,14 +304,23 @@ def today_summary(
         .all()
     )
 
+    # Everything that is still a sale — i.e. not handed back in full.
+    #
+    # ⚠ This used to test `status == "COMPLETED"`, which dropped a partially
+    # returned bill out of the day's takings ENTIRELY: return one strip off a
+    # ₹2,000 invoice and the whole ₹2,000 vanished from today's total, which
+    # then disagreed with the dashboard's "Today's Sales" card by that amount.
+    # Counting it and subtracting only what came back is the honest figure.
+    sold = [inv for inv in invoices if inv.status != "RETURNED"]
     completed_total = sum(
-        inv.total_amount for inv in invoices if inv.status == "COMPLETED"
+        (inv.total_amount or Decimal("0")) - (inv.refunded_amount or Decimal("0"))
+        for inv in sold
     )
 
     return {
         "date":            today_ist.isoformat(),
         "invoices":        [_build_list_item(inv) for inv in invoices],
-        "completed_count": sum(1 for inv in invoices if inv.status == "COMPLETED"),
+        "completed_count": len(sold),
         "total_sales":     str(completed_total),
     }
 
@@ -312,15 +329,21 @@ def today_summary(
 def list_invoices(
     page:      int           = Query(1,    ge=1,              description="Page number"),
     limit:     int           = Query(20,   ge=1,   le=100,    description="Results per page"),
+    period:    Optional[str]  = Query(
+        None,
+        description="Named date window: today | yesterday | week | month | all. "
+                    "Wins over date_from/date_to when given.",
+    ),
     date_from: Optional[date] = Query(None, description="Filter invoices from this date (inclusive)"),
     date_to:   Optional[date] = Query(None, description="Filter invoices to this date (inclusive)"),
     search:    Optional[str]  = Query(None, description="Search by invoice number or patient name"),
-    status_filter: Optional[str] = Query(None, alias="status", description="COMPLETED or RETURNED"),
+    status_filter: Optional[str] = Query(None, alias="status", description="COMPLETED, RETURNED or PARTIAL_RETURN"),
     db:        Session        = Depends(get_db),
     _:         User           = Depends(get_current_user),
 ):
     """
-    Paginated list of invoices.  Supports date range, status, and text search.
+    Paginated list of invoices.  Supports a named period OR an explicit date
+    range, plus status and text search.
     Returns lightweight InvoiceListItem rows (no full item details).
     """
     query = (
@@ -328,10 +351,36 @@ def list_invoices(
         .options(joinedload(Invoice.patient), selectinload(Invoice.items))
     )
 
-    if date_from:
-        query = query.filter(Invoice.invoice_date >= datetime.combine(date_from, time.min))
-    if date_to:
-        query = query.filter(Invoice.invoice_date <= datetime.combine(date_to, time.max))
+    # --- Date window --------------------------------------------------------
+    # Two ways to ask for one, and `period` wins because it is the more specific
+    # request.  The Invoice History tabs send a period; the older date_from /
+    # date_to pair is kept for reports and any saved URL.
+    #
+    # Either way the comparison is against a UTC WINDOW, never a raw date:
+    # invoice_date is a UTC timestamp but the pharmacist thinks in IST calendar
+    # days, and a sale made after 5:30 AM IST is on a different UTC day.  That
+    # mismatch is what made "This Week" come back empty.
+    if period and period.strip().lower() != "all":
+        bounds = period_bounds_utc(period)
+        if bounds is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown period '{period}'. Use one of: {', '.join(INVOICE_PERIODS)}.",
+            )
+        start_utc, end_utc = bounds
+        query = query.filter(
+            Invoice.invoice_date >= start_utc,
+            Invoice.invoice_date < end_utc,
+        )
+    elif not period:
+        if date_from:
+            start_utc, _ = ist_day_bounds_utc(date_from)
+            query = query.filter(Invoice.invoice_date >= start_utc)
+        if date_to:
+            # ist_day_bounds_utc returns a HALF-OPEN window, so the end is
+            # midnight IST of the following day — use "<", never "<=".
+            _, end_utc = ist_day_bounds_utc(date_to)
+            query = query.filter(Invoice.invoice_date < end_utc)
     if status_filter:
         query = query.filter(Invoice.status == status_filter.upper())
     if search:
@@ -399,10 +448,20 @@ def return_invoice(
     current_user:   User    = Depends(get_current_user),
 ):
     """
-    Return an invoice: restore stock, write RETURN movements, mark as RETURNED.
-    An already-returned invoice raises 400 to prevent double-returns.
+    Return part (or all) of an invoice: restore stock to the ORIGINAL batches,
+    write RETURN movements, and mark the invoice RETURNED or PARTIAL_RETURN.
+
+    body.items names the lines and quantities coming back.  Omit it to return
+    everything still outstanding (the old whole-invoice behaviour).
+    A fully-returned invoice raises 400 to prevent double-returns.
     """
-    invoice = process_return(db, invoice_number, body.reason, current_user.id)
+    invoice = process_return(
+        db,
+        invoice_number,
+        body.reason,
+        current_user.id,
+        return_items=body.items,
+    )
     db.commit()
     db.refresh(invoice)
     return _build_invoice_out(invoice)

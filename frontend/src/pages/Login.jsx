@@ -2,9 +2,16 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, setAuthToken } from '../lib/api';
 import { saveToken } from '../lib/auth';
+import { usePharmacy } from '../lib/pharmacy.jsx';
+import ARZLogo from '../components/shared/ARZLogo';
 /**
  * Login screen — full-screen glassmorphism card centered on the body gradient.
  * Submits to POST /api/auth/login, saves the JWT on success.
+ *
+ * The identifier box accepts a USERNAME OR AN EMAIL: the backend matches
+ * either (see routers/auth.py), so the person at the counter types whichever
+ * they remember.  The field is still named `username` on the wire — renaming
+ * it would break nothing but gain nothing either.
  */
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -12,6 +19,10 @@ export default function Login() {
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
   const navigate = useNavigate();
+  // The shop's own name, loaded once at app start (see lib/pharmacy.jsx).
+  // It falls back to "Health Care Centre" until the request lands, so this
+  // card never flashes blank.
+  const { pharmacy } = usePharmacy();
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -23,7 +34,7 @@ export default function Login() {
       setAuthToken(data.token.access_token);
       navigate('/');
     } catch {
-      setError('Invalid username or password');
+      setError('Invalid username/email or password');
     } finally {
       setLoading(false);
     }
@@ -62,13 +73,13 @@ export default function Login() {
         }}>
           <img
             src="/HCC_LOGO.png"
-            alt="Health Care Centre"
+            alt={pharmacy.pharmacy_name}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         </div>
 
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b', textAlign: 'center' }}>
-          Health Care Centre
+          {pharmacy.pharmacy_name}
         </h1>
         <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', marginBottom: 28 }}>
           Pharmacy ERP — please sign in
@@ -76,10 +87,12 @@ export default function Login() {
 
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <input
-            placeholder="Username"
+            placeholder="Username or Email"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
+            // "username" still tells a password manager this is the identifier
+            // field even though an email is equally valid here.
             autoComplete="username"
             disabled={loading}
           />
@@ -130,8 +143,31 @@ export default function Login() {
         </form>
 
         <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 24 }}>
-          Health Care Centre © 2026
+          {pharmacy.pharmacy_name} © {new Date().getFullYear()}
         </p>
+
+        {/* ── "Powered by" ARZ Technologies logo ──────────────────────────
+            Sits below a hairline divider at the foot of the login card. */}
+        <div style={{
+          marginTop: '24px',
+          paddingTop: '20px',
+          borderTop: '1px solid rgba(0,0,0,0.06)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '10px',
+        }}>
+          <span style={{
+            fontSize: '10px',
+            fontWeight: 600,
+            color: '#94a3b8',
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+          }}>
+            Powered by
+          </span>
+          <ARZLogo size="md" />
+        </div>
       </div>
 
       <style>{`

@@ -160,6 +160,21 @@ input:focus, select:focus, textarea:focus {
 }
 input::placeholder, textarea::placeholder { color: var(--text-hint); }
 
+/* Narrow number boxes — e.g. the "5 + 1" scheme pair, or a discount % —
+   have no room for the browser's built-in up/down spinner: the arrows sit on
+   top of the digits and the field reads as broken.  This class removes the
+   spinner so the box is just a clean number field; typing and validation are
+   unaffected.  (Used by the Bulk Add Stock cards in Inventory.jsx.) */
+input.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input.no-spinner::-webkit-outer-spin-button,
+input.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* ── Badges ──────────────────────────────────────────────────── */
 .badge {
   display: inline-flex;
@@ -203,11 +218,25 @@ tbody tr:hover { background: rgba(255,255,255,0.5); }
 tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
 
 /* ── Sidebar nav items (used by Layout.jsx via className) ──────── */
+/* THE SIDEBAR NAV MUST NEVER SCROLL — it COMPRESSES instead.
+   There are twelve nav items plus five section labels, which at a fixed 8px of
+   vertical padding each needed ~770px of sidebar. On a 768px laptop the last
+   item (Reports) fell off the bottom, and the nav's own scrollbar hid it.
+   Two rules fix that here:
+     1. clamp() ties the vertical padding to the viewport HEIGHT — 8px on a tall
+        screen, shrinking to 4px on a short one, which alone claws back ~50px.
+        Horizontal padding stays fixed; the sidebar is always 220px wide.
+     2. min-height: 0 lets the item shrink further if even that is not enough.
+        A flex item in a column has min-height: auto by default, meaning it
+        refuses to shrink below its content — which is what made the nav
+        overflow (and therefore scroll) rather than tighten up. overflow: hidden
+        keeps a squeezed item's text inside its own box instead of spilling over
+        the ARZ logo pinned below it. */
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: clamp(4px, 0.85vh, 8px) 12px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
@@ -216,6 +245,8 @@ tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
   border: 1px solid transparent;
   transition: all 0.18s;
   cursor: pointer;
+  min-height: 0;
+  overflow: hidden;
 }
 /* Keep every icon a fixed 18×18 box so it never squishes or misaligns
    when the label text is long. */
@@ -237,6 +268,27 @@ tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
 .nav-item-active svg { stroke: currentColor; }
 
 /* ── Animations ──────────────────────────────────────────────── */
+/* Row-title link: a table cell whose text opens a detail panel (e.g. the
+   medicine name in the Medicines table).  It has to look like plain text at
+   rest — a table full of underlined blue links is unreadable — and only reveal
+   itself as clickable on hover.  A :hover rule needs real CSS, which inline
+   styles cannot express, so it lives here. */
+.row-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-link:hover,
+.row-link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -263,6 +315,35 @@ tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
 @keyframes slideInRight {
   from { transform: translateX(100%); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+   Dashboard stat grid — exactly 4 cards per row (2 rows of 4 = 8 cards).
+
+   This lives in CSS rather than as an inline style on the div because inline
+   styles cannot carry media queries, and a hard 4-column grid would squash the
+   cards unreadably on a small laptop.  The pharmacy PC is 1280px or wider, so
+   4-up is the normal case; the two fallbacks below only kick in on narrower
+   screens.  `align-items: stretch` (the grid default, stated here so it is
+   obvious) is what lets each card's height: 100% fill the row evenly.
+--------------------------------------------------------------------------- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  /* 1fr rows: both rows take the height of the tallest card anywhere in the
+     grid, so all 8 cards end up identical rather than merely equal within
+     their own row.  Without this the top row sits ~10px taller than the
+     bottom one, because the patients footer is deeper than the spend pills. */
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 620px) {
+  .stats-grid { grid-template-columns: 1fr; }
 }
 
 /* Camera scanner: animated green line that sweeps the viewfinder */

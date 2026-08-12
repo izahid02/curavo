@@ -19,3 +19,6 @@ from app.models.supplier_credit import (  # noqa: F401
     SupplierCreditAccount, SupplierCreditTransaction, SupplierPaymentReminder,
     SupplierReturn, HomeVisitCharge,
 )
+# Shop-wide identity (name, tagline, address, GSTIN, DL number).  One row, read
+# by the sidebar, the login screen, the receipt and the browser tab title.
+from app.models.settings import PharmacySettings  # noqa: F401

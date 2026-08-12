@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { clearAuth, getUser } from '../lib/auth';
+import { clearAuth, getUser, saveToken } from '../lib/auth';
 import { api, setAuthToken } from '../lib/api';
+import { usePharmacy } from '../lib/pharmacy.jsx';
+import ARZLogo from './shared/ARZLogo';
+/** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
+ *  in backend/app/routers/settings.py — the backend enforces it either way. */
+const PHARMACY_SETTINGS_ROLES = ['Owner', 'Administrator'];
+
 const PAGE_TITLES = {
   '/':              'Dashboard',
   '/billing':       'Billing & POS',
@@ -38,13 +44,24 @@ const PAGE_SUBTITLES = {
   '/reports':       'Sales, inventory and profit reports',
 };
 
-/** Section label inside the sidebar nav. */
+/** Section label inside the sidebar nav.
+ *
+ *  The generous 16px gap above each label is what separates one group of nav
+ *  items from the next — but five labels × 16px is 80px of the sidebar, which is
+ *  what pushed the last nav item off a short screen.  So it scales with the
+ *  viewport height the same way .nav-item's padding does (see global.css): the
+ *  full 16px of breathing room on a tall monitor, tightening to 6px on a small
+ *  laptop rather than costing anyone the Reports link. */
 function NavSection({ label }) {
   return (
     <div style={{
       fontSize: '10px', fontWeight: 600, textTransform: 'uppercase',
-      letterSpacing: '0.08em', color: '#94a3b8', padding: '16px 12px 4px',
+      letterSpacing: '0.08em', color: '#94a3b8',
+      padding: 'clamp(6px, 1.5vh, 16px) 12px 4px',
       margin: 0,
+      // Same reason as .nav-item: a column flex child will not shrink below its
+      // content unless told it may, and the nav must tighten, never scroll.
+      minHeight: 0,
     }}>
       {label}
     </div>
@@ -93,10 +110,16 @@ export default function Layout() {
   const [followUpPendingAction, setFollowUpPendingAction] = useState(0);
   const [creditOverdueCount, setCreditOverdueCount] = useState(0);
 
+  /* The shop's own name, loaded once at app start (see lib/pharmacy.jsx).
+     `refresh` is called after the settings modal saves so the sidebar, the tab
+     title and the receipt all pick up a rename at the same moment. */
+  const { pharmacy, refresh: refreshPharmacy } = usePharmacy();
+
   /* Account menu / profile state */
   const [accountMenuOpen, setAccountMenuOpen]     = useState(false);
   const [showEditProfile, setShowEditProfile]     = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showPharmacySettings, setShowPharmacySettings] = useState(false);
   const [profile, setProfile]                     = useState(null);
   const [avatarUrl, setAvatarUrl]                 = useState(null);
   const [avatarError, setAvatarError]             = useState(null);
@@ -140,7 +163,7 @@ export default function Layout() {
   const today     = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
-  const pageTitle = PAGE_TITLES[location.pathname] ?? 'Health Care Centre';
+  const pageTitle = PAGE_TITLES[location.pathname] ?? pharmacy.pharmacy_name;
 
   /* Name to greet with — prefer the fetched profile, fall back to the token user. */
   const displayName = profile?.full_name || profile?.username
@@ -249,7 +272,7 @@ export default function Layout() {
     api.get('/inventory/alerts/expiry')
       .then(({ data }) => {
         // Use the ONE canonical count (distinct products expired/expiring within
-        // 90 days) so the sidebar badge matches the Dashboard card and the
+        // 60 days) so the sidebar badge matches the Dashboard card and the
         // Expiry Alerts page exactly. Previously this summed only the expired +
         // 7-day BATCH lists, which disagreed with both other places.
         setAlertCount(data.alert_product_count ?? 0);
@@ -296,7 +319,17 @@ export default function Layout() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', position: 'relative', zIndex: 1 }}>
 
-      {/* ══ SIDEBAR ══════════════════════════════════════════════════ */}
+      {/* ══ SIDEBAR ══════════════════════════════════════════════════
+          Exactly one viewport tall, split into three flex rows: the brand
+          block, the nav, and the ARZ credit line.  Only the MIDDLE one may
+          change size — see each block below.
+
+          It stays put while the page scrolls without needing position: fixed,
+          because nothing at page level scrolls: this row is 100vh and <main>
+          below carries its own overflowY: auto.  Keeping the sidebar in normal
+          flow means the main column's width is still worked out by the browser;
+          taking it out would need a matching 220px margin on that column, one
+          more thing to keep in sync for no visible gain. */}
       <aside style={{
         width: 220,
         position: 'relative', zIndex: 10,
@@ -309,8 +342,10 @@ export default function Layout() {
         flexShrink: 0,
       }}>
 
-        {/* Brand block */}
+        {/* Brand block — flexShrink: 0, so the shop's own name and logo are
+            never the thing that gives way when the screen is short. */}
         <div style={{
+          flexShrink: 0,
           padding: '20px 16px 16px',
           borderBottom: '1px solid rgba(99, 102, 241, 0.1)',
           marginBottom: '8px',
@@ -332,6 +367,9 @@ export default function Layout() {
                 flexShrink: 0,
               }}
             />
+            {/* Shop name. The old teal "Powered by ARZ Technologies" line that
+                sat here has moved to the bottom of the sidebar, where it is
+                now the real ARZ logo instead of plain text. */}
             <div style={{
               display: 'flex',
               flexDirection: 'column',
@@ -343,26 +381,49 @@ export default function Layout() {
                 fontSize: '14px',
                 color: 'var(--text)',
                 lineHeight: 1.2,
+                // The name is now the OWNER'S text, not a fixed string, so it
+                // has to be able to be long. Ellipsis rather than nowrap-
+                // overflow keeps it from pushing the sidebar wider.
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
-              }}>
-                Health Care Centre
-              </div>
-              <div style={{
-                fontSize: '9px',
-                color: '#0d9488',
-                fontWeight: 600,
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-                whiteSpace: 'nowrap',
-              }}>
-                Powered by ARZ Technologies
+              }}
+                title={pharmacy.pharmacy_name}
+              >
+                {pharmacy.pharmacy_name}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav style={{ padding: '12px 10px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {/* Navigation — NO SCROLLBAR, EVER.
+            flex: 1 makes this block absorb all the leftover height between the
+            brand block above and the ARZ logo block below.  Because the ARZ
+            block is a real sibling in normal flow (not absolutely positioned),
+            the browser reserves its height here automatically.
+
+            There is deliberately NO overflow property.  It used to be
+            overflowY: auto, which meant that on a 768px laptop — where all
+            seventeen rows (12 links + 5 section labels) do not quite fit — the
+            nav grew its own scrollbar and simply hid the last item, Reports.
+            A hidden nav item is a feature the user cannot find.  Instead the
+            rows COMPRESS: their vertical padding is tied to the viewport height
+            with clamp(), and both .nav-item and NavSection set min-height: 0 so
+            flexbox may squeeze them further if even that is not enough.  Since
+            nothing can then overflow this box, no scrollbar can appear and
+            nothing can paint over the ARZ logo below.
+            minHeight: 0 on this container is what lets it be shorter than its
+            own content in the first place — without it a column flex child
+            refuses to shrink and pushes the footer off the screen. */}
+        <nav style={{
+          padding: 'clamp(2px, 0.6vh, 12px) 10px',
+          flex: 1, minHeight: 0,
+          display: 'flex', flexDirection: 'column',
+          // Sixteen gaps between seventeen rows adds up, so this scales with the
+          // screen too: ~3px of separation on a big monitor, closing to nothing
+          // on a short laptop where the nav needs every pixel.
+          gap: 'clamp(0px, 0.25vh, 3px)',
+        }}>
 
           <NavSection label="Main" />
 
@@ -504,7 +565,56 @@ export default function Layout() {
             </svg>
             Reports
           </NavLink>
+
+          <NavLink to="/backup" className={navClass}>
+            {/* Database / disk icon — stacked cylinders */}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <ellipse cx="12" cy="5" rx="9" ry="3"/>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+              <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>
+            </svg>
+            Backup
+          </NavLink>
         </nav>
+
+        {/* ── "Powered by" ARZ Technologies logo ──────────────────────────
+            Pinned to the bottom of the sidebar as the LAST flex child, in
+            normal document flow. It used to be `position: absolute`, which
+            took it out of flow: the nav then believed it had the full height
+            of the sidebar to scroll through, so the last nav item (Reports)
+            slid underneath this block and the logo itself looked clipped.
+            flexShrink: 0 is the other half of the fix — it is the ONE part of
+            the sidebar that must not compress, so a long nav list can never
+            squeeze the logo down and cut it off.
+
+            The whole block sits at 75% opacity: a credit line should be
+            readable but never compete with the pharmacist's actual navigation.
+            It comes up to full strength on hover, for anyone who wants to look
+            at it properly.  Label and logo are both left-aligned to the same
+            16px edge as the brand block at the top of the sidebar. */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: '14px 16px 24px',
+            borderTop: '1px solid rgba(99, 102, 241, 0.08)',
+            opacity: 0.75,
+            transition: 'opacity 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.75'; }}
+        >
+          <div style={{
+            fontSize: '10px',
+            fontWeight: 600,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: '#6b7280',
+            marginBottom: '6px',
+          }}>
+            Powered by
+          </div>
+          <ARZLogo size="sm" />
+        </div>
       </aside>
 
       {/* ══ MAIN AREA ════════════════════════════════════════════════ */}
@@ -736,6 +846,26 @@ export default function Layout() {
               label="Change Password"
             />
 
+            {/* Pharmacy Settings — renaming the shop, and changing the GSTIN
+                printed on every tax invoice, is an ownership decision.  The
+                backend enforces the same rule; hiding the row keeps a
+                pharmacist from opening a form they cannot save. */}
+            {PHARMACY_SETTINGS_ROLES.includes(profile?.role || user?.role_name) && (
+              <MenuItem
+                color="#1e1b4b"
+                hover="rgba(99,102,241,0.06)"
+                onClick={() => { setAccountMenuOpen(false); setShowPharmacySettings(true); }}
+                icon={(
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.8">
+                    <path d="M3 9l1.5-5h15L21 9" />
+                    <path d="M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+                    <path d="M9 21v-6h6v6" />
+                  </svg>
+                )}
+                label="Pharmacy Settings"
+              />
+            )}
+
             <div style={{ height: '1px', background: 'rgba(99,102,241,0.1)', margin: '6px 0' }} />
 
             <MenuItem
@@ -763,6 +893,20 @@ export default function Layout() {
           profile={profile}
           onClose={() => setShowEditProfile(false)}
           onSaved={(updated) => { setProfile(updated); showToast('Profile updated'); }}
+        />
+      )}
+
+      {/* ══ PHARMACY SETTINGS MODAL ══════════════════════════════════ */}
+      {showPharmacySettings && (
+        <PharmacySettingsModal
+          pharmacy={pharmacy}
+          onClose={() => setShowPharmacySettings(false)}
+          onSaved={() => {
+            // Reload the shared settings so the sidebar brand, the browser tab
+            // title and the next printed receipt all update together.
+            refreshPharmacy();
+            showToast('Pharmacy settings saved');
+          }}
         />
       )}
 
@@ -848,27 +992,59 @@ const modalInput = {
   boxSizing: 'border-box', marginBottom: 14,
 };
 
-/** Modal for editing the current user's name / email / phone. */
+/** What a username may contain — must match USERNAME_PATTERN in routers/auth.py. */
+const USERNAME_RE = /^[A-Za-z0-9_]+$/;
+
+/** Modal for editing the current user's username / name / email / phone. */
 function EditProfileModal({ profile, onClose, onSaved }) {
+  const [username, setUsername] = useState(profile?.username || '');
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [email, setEmail]       = useState(profile?.email || '');
   const [phone, setPhone]       = useState(profile?.phone || '');
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState('');
 
+  const usernameChanged = username.trim() !== (profile?.username || '');
+
   async function handleSave() {
-    setSaving(true);
     setError('');
+
+    // Validate the username here as well as on the server, so a typo is caught
+    // before a round-trip.  The rules are the server's — see routers/auth.py.
+    const trimmed = username.trim();
+    if (usernameChanged) {
+      if (trimmed.length < 3) {
+        return setError('Username must be at least 3 characters.');
+      }
+      if (!USERNAME_RE.test(trimmed)) {
+        return setError('Username may only contain letters, numbers and underscores — no spaces.');
+      }
+    }
+
+    setSaving(true);
     try {
-      const res = await api.put('/auth/me/profile', {
-        full_name: fullName,
-        email,
-        phone,
-      });
+      const body = { full_name: fullName, email, phone };
+      // Only send the username when it actually changed: sending it unchanged
+      // would still make the backend mint a new token for no reason.
+      if (usernameChanged) body.username = trimmed;
+
+      const res = await api.put('/auth/me/profile', body);
+
+      // ⚠ THE JWT IDENTIFIES ITS HOLDER BY USERNAME.  The moment the name
+      // changes the old token stops resolving, so the backend hands back a
+      // fresh one.  Swapping it in here is what stops the very next request
+      // 401-ing and bouncing the pharmacist to the login screen mid-shift.
+      if (res.data.access_token) {
+        const savedUser = getUser() || {};
+        saveToken(res.data.access_token, { ...savedUser, username: res.data.username });
+        setAuthToken(res.data.access_token);
+      }
+
       onSaved(res.data);
       onClose();
-    } catch {
-      setError('Could not save changes. Please try again.');
+    } catch (err) {
+      // Surface the backend message (e.g. "Username already taken").
+      setError(err.response?.data?.detail || 'Could not save changes. Please try again.');
       setSaving(false);
     }
   }
@@ -880,13 +1056,25 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           Edit Profile
         </h2>
 
+        <label style={modalLabel}>Username</label>
+        <input style={{ ...modalInput, marginBottom: 4 }} value={username}
+          onChange={(e) => setUsername(e.target.value)} placeholder="e.g. admin" />
+        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 14 }}>
+          {usernameChanged
+            ? `⚠ You will sign in as "${username.trim()}" from now on — "${profile?.username}" will stop working.`
+            : 'Letters, numbers and underscores. At least 3 characters.'}
+        </div>
+
         <label style={modalLabel}>Full Name</label>
         <input style={modalInput} value={fullName}
           onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
 
         <label style={modalLabel}>Email</label>
-        <input style={modalInput} type="email" value={email}
+        <input style={{ ...modalInput, marginBottom: 4 }} type="email" value={email}
           onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 14 }}>
+          You can sign in with this email as well as your username.
+        </div>
 
         <label style={modalLabel}>Phone</label>
         <input style={modalInput} value={phone}
@@ -902,6 +1090,121 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           </button>
           <button className="btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * Modal for the shop's own identity — name, tagline, address, contact and the
+ * two legal numbers printed on every tax invoice.
+ *
+ * Owner / Administrator only (PHARMACY_SETTINGS_ROLES above; the backend
+ * enforces the same rule, so hiding the menu item is convenience, not
+ * security).
+ *
+ * Saving here changes what appears in the sidebar, on the login screen, on the
+ * printed receipt and in the browser tab title, because all four read the same
+ * shared settings (see lib/pharmacy.jsx).
+ */
+function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    pharmacy_name:      pharmacy?.pharmacy_name || '',
+    pharmacy_tagline:   pharmacy?.pharmacy_tagline || '',
+    pharmacy_address:   pharmacy?.pharmacy_address || '',
+    pharmacy_phone:     pharmacy?.pharmacy_phone || '',
+    pharmacy_email:     pharmacy?.pharmacy_email || '',
+    pharmacy_gstin:     pharmacy?.pharmacy_gstin || '',
+    pharmacy_dl_number: pharmacy?.pharmacy_dl_number || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
+
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  async function handleSave() {
+    if (!form.pharmacy_name.trim()) {
+      return setError('Pharmacy name is required.');
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await api.put('/settings/pharmacy', form);
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not save settings. Please try again.');
+      setSaving(false);
+    }
+  }
+
+  return createPortal(
+    <div style={modalBackdrop} onMouseDown={onClose}>
+      <div
+        style={{ ...modalCard, maxWidth: 460, maxHeight: '88vh', overflowY: 'auto' }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#1e1b4b' }}>
+          Pharmacy Settings
+        </h2>
+        <p style={{ margin: '0 0 18px', fontSize: 12, color: '#6b7280' }}>
+          These details appear in the sidebar, on the login screen and at the top
+          of every printed receipt.
+        </p>
+
+        <label style={modalLabel}>Name *</label>
+        <input style={modalInput} value={form.pharmacy_name}
+          onChange={(e) => set('pharmacy_name', e.target.value)}
+          placeholder="Health Care Centre" />
+
+        <label style={modalLabel}>Tagline</label>
+        <input style={modalInput} value={form.pharmacy_tagline}
+          onChange={(e) => set('pharmacy_tagline', e.target.value)}
+          placeholder="Pharmacy & Medical Store" />
+
+        <label style={modalLabel}>Address</label>
+        <textarea style={{ ...modalInput, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }}
+          value={form.pharmacy_address}
+          onChange={(e) => set('pharmacy_address', e.target.value)}
+          placeholder="Shop address as it should print on the bill" />
+
+        <label style={modalLabel}>Phone</label>
+        <input style={modalInput} value={form.pharmacy_phone}
+          onChange={(e) => set('pharmacy_phone', e.target.value)}
+          placeholder="e.g. 98640 12345" />
+
+        <label style={modalLabel}>Email</label>
+        <input style={modalInput} type="email" value={form.pharmacy_email}
+          onChange={(e) => set('pharmacy_email', e.target.value)}
+          placeholder="shop@example.com" />
+
+        <label style={modalLabel}>GSTIN</label>
+        <input style={modalInput} value={form.pharmacy_gstin}
+          onChange={(e) => set('pharmacy_gstin', e.target.value)}
+          placeholder="15-character GST number" />
+
+        <label style={modalLabel}>DL Number</label>
+        <input style={{ ...modalInput, marginBottom: 4 }} value={form.pharmacy_dl_number}
+          onChange={(e) => set('pharmacy_dl_number', e.target.value)}
+          placeholder="Drug Licence number" />
+        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 14 }}>
+          GSTIN and DL number are legally required on a pharmacy bill — they
+          print on the receipt whenever they are filled in.
+        </div>
+
+        {error && (
+          <div style={{ color: '#e11d48', fontSize: 12, marginBottom: 12 }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Settings'}
           </button>
         </div>
       </div>

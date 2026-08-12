@@ -129,9 +129,20 @@ def resolve_return_context(db: Session, batch_id: int) -> Optional[dict]:
 
     supplier = db.get(Supplier, supplier_id)
 
-    # Prefer the recorded cost price; fall back to the batch's own figure.
+    # What one unit really cost us, in preference order:
+    #   1. effective_cost — the rate AFTER any supplier discount.  A "5% trade
+    #      discount" means we paid ₹57, not ₹60, so the supplier owes us the
+    #      ₹57 and the GST lost is 12% of ₹57.  Valuing the return at the
+    #      rate card would claim back money we never handed over.
+    #   2. cost_price    — the rate card; correct for a purchase with no discount
+    #      and for every row recorded before discounts existed.
+    #   3. batch.purchase_price — last resort for stock that came in through the
+    #      older GRN flow with no stock_purchase row at all.
     purchase_price = None
-    if purchase is not None and purchase.cost_price is not None:
+    if purchase is not None and purchase.effective_cost is not None:
+        purchase_price = _money(purchase.effective_cost)
+    if (purchase_price is None or purchase_price <= 0) and purchase is not None \
+            and purchase.cost_price is not None:
         purchase_price = _money(purchase.cost_price)
     if purchase_price is None or purchase_price <= 0:
         purchase_price = _money(batch.purchase_price)

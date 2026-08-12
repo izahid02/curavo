@@ -28,6 +28,13 @@ from app.models.inventory import Batch, Department, Product
 from app.models.patients import Patient, patient_departments_table
 from app.models.user import User
 from app.services.auth_service import get_current_user
+# The single definition of "how much actually stayed sold" after a partial
+# return.  Every revenue figure in this file goes through these.
+from app.services.revenue import (
+    net_invoice_amount_expr,
+    retained_line_total_expr,
+    sold_qty_expr,
+)
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -51,6 +58,122 @@ def _resolve_dates(date_from: Optional[date], date_to: Optional[date]) -> tuple[
     """Fill in None values with defaults."""
     first, today = _default_range()
     return (date_from or first), (date_to or today)
+
+
+# ---------------------------------------------------------------------------
+# Profit maths — ONE definition, shared by every report on this page
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS
+# ---------------
+# A bill discount is stored on the INVOICE (invoices.discount_amount), not on
+# the individual lines.  invoices.subtotal is the PRE-discount ex-GST value, so
+# using it as "revenue" silently ignores every rupee given away.  A 100%
+# discount used to report a full profit — the pharmacy handed the medicine over
+# for free and the report called it a good day.
+#
+# The fix is to push each invoice's discount back down onto its lines in
+# proportion to what each line contributed to the bill, then take the ex-GST
+# part of what is LEFT.  Every profit figure in this file goes through the two
+# helpers below, so the summary cards, the daily table, the monthly trend and
+# the product tables can never drift apart.
+
+
+def _discount_ratio():
+    """
+    SQL expression: what FRACTION of this invoice was discounted away (0.0–1.0).
+
+    The denominator is the GST-INCLUSIVE bill (subtotal + GST + home visit),
+    because that is the figure the discount was actually taken off — the
+    customer is handed one total, not an ex-GST one.  Dividing by `subtotal`
+    alone would over-state the ratio by the GST factor and subtract more than
+    was really given away.
+
+    Real example — HCC-2026-000017: subtotal 95.29 + GST 4.76 = 100.05 bill,
+    discount 100.00 → ratio 0.9995.  Almost the whole bill was a giveaway.
+
+    Clamped to 1.0 because a discount is occasionally keyed in slightly ABOVE
+    the bill (HCC-2026-000003: ₹400 off a ₹400.20 bill, but ₹400 > the ₹381.14
+    subtotal).  Without the clamp the line revenue would go NEGATIVE, which
+    would then over-state the loss.  The floor is a free item, never a refund.
+    """
+    gross_bill = (
+        Invoice.subtotal
+        + Invoice.gst_amount
+        + func.coalesce(Invoice.home_visit_charge, 0)
+    )
+    # nullif → a zero-value bill divides to NULL instead of raising; the outer
+    # coalesce turns that back into "nothing was discounted".
+    raw = func.coalesce(Invoice.discount_amount, 0) * 1.0 / func.nullif(gross_bill, 0)
+    return func.coalesce(
+        case((raw > 1.0, 1.0), (raw < 0.0, 0.0), else_=raw),
+        0.0,
+    )
+
+
+def _net_revenue_expr():
+    """
+    SQL expression: REAL revenue for one invoice line — what the pharmacy keeps.
+
+    Four things happen, in this order:
+      0. retained_line_total → qty × MRP for the units the customer KEPT
+      1.                       (GST-inclusive, pre-discount)
+      2. × (1 − ratio)       → this line's share of the bill discount removed
+      3. × 100/(100 + rate)  → GST stripped out (it belongs to the government)
+
+    ⚠ STEP 0 IS THE PARTIAL-RETURN CORRECTION.  This used to start from the
+    stored line_total, which is what was ORIGINALLY sold.  On a partially
+    returned invoice those units are back on the shelf, so counting them as
+    revenue both overstated the sale and double-counted the stock (the same
+    tablets also sit in inventory value).  retained_line_total_expr() returns
+    the stored line_total unchanged when nothing came back, so every existing
+    figure is byte-for-byte what it was.
+
+    The discount RATIO is deliberately still computed from the ORIGINAL bill
+    (see _discount_ratio): the discount was negotiated on the whole bill as it
+    stood, and the share carried by the lines the customer kept does not change
+    because a different line went back.
+
+    Requires InvoiceItem joined to Invoice — every caller below does that.
+    """
+    return (
+        retained_line_total_expr()
+        * (1.0 - _discount_ratio())
+        * 100
+        / (100 + InvoiceItem.gst_rate)
+    )
+
+
+def _cost_expr():
+    """SQL expression: cost of one invoice line.
+
+    purchase_price is snapshotted onto the line at sale time (it is the batch's
+    effective cost after any supplier discount) so historical profit never
+    changes when a later delivery is cheaper.  It is already ex-GST, which is
+    why it can be compared directly with the ex-GST revenue above.
+
+    ⚠ Costed on the units KEPT, not the units billed.  Returned stock went back
+    onto the shelf at its original cost, so charging it to cost-of-goods here
+    would book the same purchase twice — once as a sale that did not stick, and
+    again as inventory we still own.
+    """
+    return sold_qty_expr() * InvoiceItem.purchase_price
+
+
+def _margin_pct(profit: float, revenue: float, cost: float) -> float:
+    """
+    Margin as a percentage, with the giveaway case handled explicitly.
+
+    revenue > 0  → the ordinary case
+    revenue == 0 → everything was discounted away.  We paid `cost` and got
+                   nothing back, so the loss is total: −100%.  (Returning 0
+                   here would make a free giveaway look break-even.)
+    both zero    → nothing happened; 0, not a fake −100%.
+    """
+    if revenue > 0:
+        return round(profit / revenue * 100, 2)
+    if cost > 0:
+        return -100.0
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -128,23 +251,24 @@ def get_sales_report(
     inv_row = (
         db.query(
             func.count(Invoice.id).label("total_invoices"),
-            func.sum(Invoice.total_amount).label("total_revenue"),
-            # subtotal = sum of taxable values (excl. GST) across all items.
-            # Used to compute profit correctly: GST collected is not our revenue —
-            # it goes to the government.  Only the excl-GST portion is kept.
-            func.sum(Invoice.subtotal).label("taxable_revenue"),
-            # CASE returns total_amount when payment matches, else 0
+            # total_amount is already net of the discount (it is what the
+            # customer actually handed over).  It is NOT net of a later partial
+            # return, though — hence net_invoice_amount_expr(), which subtracts
+            # invoices.refunded_amount.  With no refund it is total_amount
+            # exactly, so an untouched invoice reports what it always did.
+            func.sum(net_invoice_amount_expr()).label("total_revenue"),
+            # CASE returns the net amount when payment matches, else 0
             func.sum(
-                case((Invoice.payment_method == "CASH", Invoice.total_amount), else_=0)
+                case((Invoice.payment_method == "CASH", net_invoice_amount_expr()), else_=0)
             ).label("cash_sales"),
             func.sum(
-                case((Invoice.payment_method == "UPI", Invoice.total_amount), else_=0)
+                case((Invoice.payment_method == "UPI", net_invoice_amount_expr()), else_=0)
             ).label("upi_sales"),
             # The app only uses CASH / UPI / CREDIT (never "CARD"). CREDIT sales
             # were previously missing from the breakdown entirely, so the three
             # cards did not add up to Total Revenue. Count CREDIT here.
             func.sum(
-                case((Invoice.payment_method == "CREDIT", Invoice.total_amount), else_=0)
+                case((Invoice.payment_method == "CREDIT", net_invoice_amount_expr()), else_=0)
             ).label("credit_sales"),
         )
         .filter(
@@ -157,19 +281,24 @@ def get_sales_report(
 
     total_invoices  = int(inv_row.total_invoices or 0)
     total_revenue   = _f(inv_row.total_revenue)
-    taxable_revenue = _f(inv_row.taxable_revenue)   # excl-GST revenue for profit
     cash_sales   = _f(inv_row.cash_sales)
     upi_sales    = _f(inv_row.upi_sales)
     credit_sales = _f(inv_row.credit_sales)
 
     # ------------------------------------------------------------------
-    # 2. Cost and items sold: join invoice_items → invoices
+    # 2. Net revenue, cost and items sold: join invoice_items → invoices
     #    (aggregating item-level columns — no duplication risk)
+    #
+    #    Revenue is summed HERE rather than from Invoice.subtotal, because the
+    #    discount has to be spread across the lines before GST can be stripped
+    #    off what is left — see _net_revenue_expr().
     # ------------------------------------------------------------------
     cost_row = (
         db.query(
-            func.sum(InvoiceItem.quantity).label("total_items"),
-            func.sum(InvoiceItem.quantity * InvoiceItem.purchase_price).label("total_cost"),
+            # Units the customer KEPT — returned stock is back on the shelf.
+            func.sum(sold_qty_expr()).label("total_items"),
+            func.sum(_net_revenue_expr()).label("net_revenue"),
+            func.sum(_cost_expr()).label("total_cost"),
         )
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
         .filter(
@@ -181,11 +310,12 @@ def get_sales_report(
     )
 
     total_items_sold = int(cost_row.total_items or 0)
+    taxable_revenue  = _f(cost_row.net_revenue)   # post-discount, excl-GST
     total_cost = _f(cost_row.total_cost)
-    # Profit uses taxable_revenue (excl. GST), not total_revenue.
+    # Profit uses the post-discount excl-GST revenue, not total_revenue.
     # The GST collected is owed to the government — it is not profit.
     gross_profit      = taxable_revenue - total_cost
-    profit_margin_pct = round(gross_profit / taxable_revenue * 100, 2) if taxable_revenue > 0 else 0.0
+    profit_margin_pct = _margin_pct(gross_profit, taxable_revenue, total_cost)
 
     # ------------------------------------------------------------------
     # 3. Daily breakdown — two queries (one for revenue, one for cost)
@@ -195,9 +325,8 @@ def get_sales_report(
         db.query(
             func.date(Invoice.invoice_date).label("day"),
             func.count(Invoice.id).label("inv_count"),
-            func.sum(Invoice.total_amount).label("revenue"),
-            # subtotal = excl-GST amount; used for per-day profit calculation
-            func.sum(Invoice.subtotal).label("taxable_rev"),
+            # Net of refunds, matching the summary card above.
+            func.sum(net_invoice_amount_expr()).label("revenue"),
         )
         .filter(
             func.date(Invoice.invoice_date) >= date_from,
@@ -209,10 +338,13 @@ def get_sales_report(
         .all()
     )
 
+    # Per-day net revenue AND cost come from the same item-level query, so a
+    # day's profit is built from the same discounted figures as the summary.
     daily_cost_rows = (
         db.query(
             func.date(Invoice.invoice_date).label("day"),
-            func.sum(InvoiceItem.quantity * InvoiceItem.purchase_price).label("cost"),
+            func.sum(_net_revenue_expr()).label("net_revenue"),
+            func.sum(_cost_expr()).label("cost"),
         )
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
         .filter(
@@ -224,14 +356,16 @@ def get_sales_report(
         .all()
     )
 
-    cost_by_day = {str(r.day): _f(r.cost) for r in daily_cost_rows}
+    profit_by_day = {
+        str(r.day): _f(r.net_revenue) - _f(r.cost) for r in daily_cost_rows
+    }
     daily_breakdown = [
         DailyRow(
             date=str(r.day),
             revenue=_f(r.revenue),
             invoices_count=int(r.inv_count or 0),
-            # profit uses taxable_rev (excl. GST), not total revenue
-            profit=_f(r.taxable_rev) - cost_by_day.get(str(r.day), 0.0),
+            # profit = post-discount excl-GST revenue − cost
+            profit=profit_by_day.get(str(r.day), 0.0),
         )
         for r in daily_rev_rows
     ]
@@ -243,17 +377,11 @@ def get_sales_report(
     product_rows = (
         db.query(
             Product.name,
-            func.sum(InvoiceItem.quantity).label("units_sold"),
-            # Revenue = taxable value (excl. GST extracted from the MRP line_total).
-            # line_total is qty × MRP (incl. GST); strip GST with: total × 100/(100+rate)
-            func.sum(
-                InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate)
-            ).label("revenue"),
-            # Profit = taxable revenue − purchase cost (purchase_price is already excl. GST)
-            func.sum(
-                InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate)
-                - InvoiceItem.quantity * InvoiceItem.purchase_price
-            ).label("profit"),
+            func.sum(sold_qty_expr()).label("units_sold"),
+            # Revenue = post-discount, excl-GST value of the line (see helper).
+            func.sum(_net_revenue_expr()).label("revenue"),
+            # Profit = that revenue − purchase cost (purchase_price is excl. GST)
+            func.sum(_net_revenue_expr() - _cost_expr()).label("profit"),
         )
         .join(InvoiceItem, InvoiceItem.product_id == Product.id)
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
@@ -263,7 +391,7 @@ def get_sales_report(
             Invoice.status != "RETURNED",
         )
         .group_by(Product.id, Product.name)
-        .order_by(func.sum(InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate)).desc())
+        .order_by(func.sum(_net_revenue_expr()).desc())
         .limit(10)
         .all()
     )
@@ -284,10 +412,9 @@ def get_sales_report(
     dept_rows = (
         db.query(
             Department.name,
-            # Revenue = taxable value (excl. GST) — consistent with product revenue above
-            func.sum(
-                InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate)
-            ).label("revenue"),
+            # Revenue = post-discount excl-GST value — same helper as above, so
+            # the department table always reconciles with the product table.
+            func.sum(_net_revenue_expr()).label("revenue"),
             func.count(distinct(Invoice.id)).label("invoices_count"),
         )
         .join(Product, Product.department_id == Department.id)
@@ -299,7 +426,7 @@ def get_sales_report(
             Invoice.status != "RETURNED",
         )
         .group_by(Department.id, Department.name)
-        .order_by(func.sum(InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate)).desc())
+        .order_by(func.sum(_net_revenue_expr()).desc())
         .limit(5)
         .all()
     )
@@ -618,22 +745,18 @@ def get_profit_report(
     # ------------------------------------------------------------------
     # Summary: same structure as sales report but profit-focused
     # ------------------------------------------------------------------
-    rev_row = (
-        # Use Invoice.subtotal (sum of excl-GST taxable values) as revenue.
-        # Invoice.total_amount includes GST collected for the government,
-        # which is not profit.  subtotal is the portion the pharmacy keeps.
-        db.query(func.sum(Invoice.subtotal).label("rev"))
-        .filter(
-            func.date(Invoice.invoice_date) >= date_from,
-            func.date(Invoice.invoice_date) <= date_to,
-            Invoice.status != "RETURNED",
+    # Revenue and cost are summed from the same item-level query so both sides
+    # of the subtraction cover exactly the same set of lines.
+    #
+    # Revenue is NOT Invoice.subtotal: that is the PRE-discount figure, so a
+    # bill given away at 100% off would still be counted as full revenue and
+    # reported as profit.  _net_revenue_expr() takes each line's share of the
+    # bill discount off first, then strips the GST.
+    totals_row = (
+        db.query(
+            func.sum(_net_revenue_expr()).label("rev"),
+            func.sum(_cost_expr()).label("cost"),
         )
-        .one()
-    )
-    revenue = _f(rev_row.rev)
-
-    cost_row = (
-        db.query(func.sum(InvoiceItem.quantity * InvoiceItem.purchase_price).label("cost"))
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
         .filter(
             func.date(Invoice.invoice_date) >= date_from,
@@ -642,9 +765,12 @@ def get_profit_report(
         )
         .one()
     )
-    cost = _f(cost_row.cost)
+    revenue = _f(totals_row.rev)
+    cost = _f(totals_row.cost)
+    # If everything was discounted away, revenue is 0 and this correctly
+    # becomes −cost: the stock left the shelf and no money came back.
     gross_profit = revenue - cost
-    profit_margin_pct = round(gross_profit / revenue * 100, 2) if revenue > 0 else 0.0
+    profit_margin_pct = _margin_pct(gross_profit, revenue, cost)
 
     # ------------------------------------------------------------------
     # Monthly trend — last 6 calendar months (fixed, not affected by filter)
@@ -665,30 +791,14 @@ def get_profit_report(
 
     trend_start = date(months[0][0], months[0][1], 1)
 
-    # Revenue per (year, month) — use subtotal (excl. GST) for profit accuracy
-    monthly_rev_rows = (
+    # Revenue AND cost per (year, month) — one item-level query, so each
+    # month's revenue is discount-adjusted exactly like the summary above.
+    monthly_rows = (
         db.query(
             func.extract("year",  Invoice.invoice_date).label("yr"),
             func.extract("month", Invoice.invoice_date).label("mo"),
-            func.sum(Invoice.subtotal).label("revenue"),
-        )
-        .filter(
-            func.date(Invoice.invoice_date) >= trend_start,
-            Invoice.status != "RETURNED",
-        )
-        .group_by(
-            func.extract("year",  Invoice.invoice_date),
-            func.extract("month", Invoice.invoice_date),
-        )
-        .all()
-    )
-
-    # Cost per (year, month) — from invoice_items joined to invoices
-    monthly_cost_rows = (
-        db.query(
-            func.extract("year",  Invoice.invoice_date).label("yr"),
-            func.extract("month", Invoice.invoice_date).label("mo"),
-            func.sum(InvoiceItem.quantity * InvoiceItem.purchase_price).label("cost"),
+            func.sum(_net_revenue_expr()).label("revenue"),
+            func.sum(_cost_expr()).label("cost"),
         )
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
         .filter(
@@ -702,15 +812,15 @@ def get_profit_report(
         .all()
     )
 
-    rev_by_month  = {(int(r.yr), int(r.mo)): _f(r.revenue) for r in monthly_rev_rows}
-    cost_by_month = {(int(r.yr), int(r.mo)): _f(r.cost)    for r in monthly_cost_rows}
+    rev_by_month  = {(int(r.yr), int(r.mo)): _f(r.revenue) for r in monthly_rows}
+    cost_by_month = {(int(r.yr), int(r.mo)): _f(r.cost)    for r in monthly_rows}
 
     monthly_trend = []
     for y, m in months:
         rev  = rev_by_month.get((y, m), 0.0)
         c    = cost_by_month.get((y, m), 0.0)
         prof = rev - c
-        marg = round(prof / rev * 100, 2) if rev > 0 else 0.0
+        marg = _margin_pct(prof, rev, c)
         monthly_trend.append(MonthlyTrendRow(
             month=date(y, m, 1).strftime("%b %Y"),
             revenue=rev,
@@ -722,12 +832,12 @@ def get_profit_report(
     # ------------------------------------------------------------------
     # Product profitability — top 15 by profit in the date range
     # ------------------------------------------------------------------
-    # Revenue = taxable value (excl. GST extracted from line_total)
-    # Profit  = taxable revenue − purchase cost
-    profit_expr = (
-        func.sum(InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate))
-        - func.sum(InvoiceItem.quantity * InvoiceItem.purchase_price)
-    )
+    # Revenue = post-discount value, excl. GST
+    # Profit  = that revenue − purchase cost
+    # Sorting by this expression means a product sold at a heavy discount now
+    # sinks down the table (or off it) instead of being credited with a profit
+    # it never earned.
+    profit_expr = func.sum(_net_revenue_expr() - _cost_expr())
 
     # Items with no recorded purchase price (cost = 0) would otherwise show
     # their full selling price as "profit", which is misleading.  We exclude
@@ -749,11 +859,9 @@ def get_profit_report(
     prod_rows = (
         db.query(
             Product.name,
-            func.sum(InvoiceItem.quantity).label("units_sold"),
-            func.sum(
-                InvoiceItem.line_total * 100 / (100 + InvoiceItem.gst_rate)
-            ).label("revenue"),
-            func.sum(InvoiceItem.quantity * InvoiceItem.purchase_price).label("cost"),
+            func.sum(sold_qty_expr()).label("units_sold"),
+            func.sum(_net_revenue_expr()).label("revenue"),
+            func.sum(_cost_expr()).label("cost"),
         )
         .join(InvoiceItem, InvoiceItem.product_id == Product.id)
         .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
@@ -774,8 +882,9 @@ def get_profit_report(
     for r in prod_rows:
         rev  = _f(r.revenue)
         c    = _f(r.cost)
+        # Fully discounted product: rev is 0, so this is −c, a real loss.
         prof = rev - c
-        marg = round(prof / rev * 100, 2) if rev > 0 else 0.0
+        marg = _margin_pct(prof, rev, c)
         product_profitability.append(ProductProfitRow(
             product_name=r.name,
             units_sold=int(r.units_sold or 0),
@@ -920,7 +1029,9 @@ def get_patients_report(
         db.query(
             Patient.name,
             Patient.mobile,
-            func.sum(Invoice.total_amount).label("total_spent"),
+            # Net of refunds — a patient who brought half the bill back is not
+            # the pharmacy's best customer for the full amount.
+            func.sum(net_invoice_amount_expr()).label("total_spent"),
             func.count(Invoice.id).label("visit_count"),
         )
         .join(Invoice, Invoice.patient_id == Patient.id)
@@ -930,7 +1041,7 @@ def get_patients_report(
             Invoice.status != "RETURNED",
         )
         .group_by(Patient.id, Patient.name, Patient.mobile)
-        .order_by(func.sum(Invoice.total_amount).desc())
+        .order_by(func.sum(net_invoice_amount_expr()).desc())
         .limit(10)
         .all()
     )

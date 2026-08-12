@@ -53,6 +53,10 @@ class Supplier(Base):
     phone          = Column(String(20))
     address        = Column(Text)
     gst_number     = Column(String(20))
+    # Drug Licence number.  Every pharmaceutical distributor in India must hold
+    # one, and the pharmacy is legally required to record it against purchases,
+    # so it sits next to the GSTIN on the supplier record.
+    dl_number      = Column(String(50))
     created_at     = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     # One supplier → many batches
@@ -144,7 +148,12 @@ class Batch(Base):
     # Distributors offer schemes like "5+1" (buy 5, get 1 free).  The free units
     # enter stock at zero cost; we record the scheme here for reference and so a
     # later return can value only the PAID units (bonus units were free).
-    #   scheme_buy / scheme_free — the two halves of "5+1"
+    #
+    # ⚠ A SCHEME IS COUNTED IN PACKS, NOT TABLETS.  "5+1" on a strip medicine
+    # means 5 STRIPS earn 1 free strip.  scheme_buy/scheme_free store the human
+    # numbers (5 and 1); inventory_service._compute_scheme scales them by
+    # units_per_strip before working out bonus_quantity, which is in UNITS.
+    #   scheme_buy / scheme_free — the two halves of "5+1", in packs
     #   scheme_label             — the human string, e.g. "5+1"
     #   bonus_quantity           — how many of quantity_received were free
     #   paid_quantity            — how many were actually paid for
@@ -196,8 +205,46 @@ class StockPurchase(Base):
     supplier_invoice_date   = Column(Date, nullable=False)
     quantity                = Column(Integer, nullable=False)
     mrp                     = Column(Numeric(10, 2), nullable=False)
-    # cost_price is optional — the pharmacist may not always record what we paid.
-    cost_price              = Column(Numeric(10, 2), nullable=True)
+    # cost_price is the S.Rate: the PRE-TAX (ex-GST), PRE-discount price of ONE
+    # unit, exactly as the distributor's rate card states it.  Optional only for
+    # historical rows; the Add Stock form now requires it.
+    #
+    # ⚠ FOUR decimal places, not two.  A ₹86.10 strip of 15 tablets is ₹5.74/unit;
+    # rounded to paise and multiplied back up over 150 units the invoice drifts
+    # by nearly a rupee.  Line totals below stay at paise — that IS the money.
+    cost_price              = Column(Numeric(12, 4), nullable=True)
+    # --- What we actually PAY the supplier ----------------------------------
+    # A distributor's invoice takes the trade discount off the rate FIRST, then
+    # charges GST on what is left.  So the money that leaves the till is the
+    # discounted goods value plus tax on that.  The figures are kept apart:
+    #   effective_cost  → profit margin maths (ex-GST, post-discount, per unit)
+    #   gst_on_purchase → the tax we paid ON THIS LINE; NOT recoverable if the
+    #                     stock expires and goes back, so it drives expiry loss
+    #   total_cost      → goods + GST for the line; what supplier credit uses
+    # gst_on_purchase and total_cost are LINE totals (whole delivery of this
+    # medicine), not per-unit prices.
+    gst_on_purchase         = Column(Numeric(12, 2), default=0)
+    total_cost              = Column(Numeric(12, 2), default=0)
+    # --- Supplier discount --------------------------------------------------
+    # Distributors often knock money off the rate card: "5% trade discount" or
+    # a flat "₹30 off per strip".  Both forms end up as the SAME thing — a lower
+    # real cost per unit — so we store the discount in both shapes plus the
+    # resulting cost, and let every downstream calculation read effective_cost.
+    #   discount_percent → e.g. 5.00 for 5%; 0 when the discount was flat ₹
+    #   discount_amount  → the discount in ₹ PER UNIT (never per strip — the
+    #                      frontend divides by units_per_strip before sending,
+    #                      exactly as it already does for cost_price)
+    #   effective_cost   → cost_price − discount_amount, per unit, EX-GST.  This
+    #                      is the post-discount price the supplier then charges
+    #                      GST on, and the figure that drives profit margin,
+    #                      expiry loss and supplier-return value.
+    # Historical rows have NULL effective_cost, which every reader treats as
+    # "no discount" and falls back to cost_price.
+    # 4dp for the same reason as cost_price: 5% off ₹86.10 is ₹4.305, and half a
+    # paisa per unit is a real rupee once you multiply by a delivery.
+    discount_percent        = Column(Numeric(5, 2), default=0)
+    discount_amount         = Column(Numeric(12, 4), default=0)
+    effective_cost          = Column(Numeric(12, 4), nullable=True)
     # --- Bonus / scheme purchase (Feature B) --------------------------------
     # Mirrors the batch's scheme so Purchase History can show "50 paid + 10
     # bonus = 60 total" without joining back to the batch.  quantity above is

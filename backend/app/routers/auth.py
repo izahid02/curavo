@@ -9,9 +9,11 @@ app/services/auth_service.py.  Routes just call those functions and return.
 """
 import mimetypes
 import os
+import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_avatars_dir, get_db
@@ -45,10 +47,24 @@ AVATAR_TYPES = {
 }
 AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 
+# What a username may contain: letters, digits and underscore only.
+# No spaces (they are invisible at the end of a typed name and would silently
+# break sign-in) and no punctuation that could be confused with an email.
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
-def _build_profile(user: User) -> ProfileOut:
-    """Assemble the ProfileOut payload for a user row."""
+
+def _build_profile(user: User, access_token: str | None = None) -> ProfileOut:
+    """
+    Assemble the ProfileOut payload for a user row.
+
+    access_token is only filled in when the username just changed: the JWT
+    identifies its holder by username, so the token the browser is holding
+    stops resolving the instant the name does.  Handing back a fresh one lets
+    the frontend swap it in without bouncing the pharmacist to the login screen
+    mid-shift.
+    """
     return ProfileOut(
+        access_token = access_token,
         id         = user.id,
         username   = user.username,
         full_name  = user.full_name,
@@ -68,8 +84,26 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     The frontend saves this token and sends it with every subsequent request.
     If credentials are wrong we always return the same vague "Invalid credentials"
     message — never say *which* field was wrong; that would help an attacker.
+
+    The identifier field accepts EITHER a username OR an email address, because
+    the person at the counter remembers one or the other and should not have to
+    know which one the account was created with.  func.lower() on both sides
+    makes the match case-insensitive: an email typed with a capital letter is
+    the same address, and SQLite's default comparison would otherwise reject it.
     """
-    user = db.query(User).filter(User.username == body.username).first()
+    identifier = (body.username or "").strip()
+    user = (
+        db.query(User)
+        .filter(
+            or_(
+                func.lower(User.username) == identifier.lower(),
+                # Users created before the email column existed have NULL here,
+                # which simply never matches — no special case needed.
+                func.lower(User.email) == identifier.lower(),
+            )
+        )
+        .first()
+    )
 
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(
@@ -124,12 +158,48 @@ def update_my_profile(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Update the logged-in user's contact details.
+    Update the logged-in user's contact details, and optionally their username.
 
     Only fields that are actually sent (non-None) are changed, so a partial
     update never wipes an unrelated field.  Empty strings are treated as
     "clear this optional field" for email/phone.
+
+    ⚠ CHANGING THE USERNAME CHANGES HOW YOU SIGN IN.  The old name stops
+    working immediately, and the JWT identifies its holder by username ("sub"),
+    so the current token is dead the moment the change commits.  The response
+    carries a fresh token for exactly that reason — see below.
     """
+    if body.username is not None:
+        new_username = body.username.strip()
+        # Validate before touching anything: a username is a login credential,
+        # and a blank or duplicate one locks the user out of their own account.
+        if len(new_username) < 3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username must be at least 3 characters.",
+            )
+        if not USERNAME_PATTERN.fullmatch(new_username):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username may only contain letters, numbers and underscores — no spaces.",
+            )
+        # Case-insensitive uniqueness: "Admin" and "admin" must not both exist,
+        # because login itself matches case-insensitively.
+        taken = (
+            db.query(User.id)
+            .filter(
+                func.lower(User.username) == new_username.lower(),
+                User.id != current_user.id,
+            )
+            .first()
+        )
+        if taken:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already taken",
+            )
+        current_user.username = new_username
+
     if body.full_name is not None:
         # full_name is required at the DB level — ignore an empty value rather
         # than storing a blank name.
@@ -143,7 +213,14 @@ def update_my_profile(
 
     db.commit()
     db.refresh(current_user)
-    return _build_profile(current_user)
+
+    # Only mint a new token when the username actually moved — a name/phone
+    # edit leaves the existing token perfectly valid.
+    fresh_token = None
+    if body.username is not None:
+        fresh_token = create_access_token({"sub": current_user.username})
+
+    return _build_profile(current_user, access_token=fresh_token)
 
 
 @router.post("/me/avatar")

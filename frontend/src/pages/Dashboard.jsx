@@ -1,13 +1,15 @@
 /**
  * Dashboard — wired to real data from GET /api/dashboard/summary.
  *
- * Shows 6 stat cards, a recent-invoices panel, and a top-products panel.
+ * Shows 8 stat cards laid out as 2 rows of 4 (see .stats-grid in global.css),
+ * a recent-invoices panel, and a top-products panel.
  * All amounts are formatted in the Indian numbering system (₹1,24,500).
  */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getUser } from '../lib/auth';
+import ExpenditurePanel from '../components/dashboard/ExpenditurePanel';
 
 // ---------------------------------------------------------------------------
 // Indian number format helper
@@ -44,6 +46,13 @@ function currentMonthName() {
 // Skeleton pulse card
 // ---------------------------------------------------------------------------
 
+/**
+ * Every stat card is at least this tall.  All 8 share it so the two rows line
+ * up perfectly even though the expenditure cards carry extra content (the
+ * category pills) and the patients card carries a new/returning footer.
+ */
+const CARD_MIN_HEIGHT = 140;
+
 function SkeletonCard() {
   return (
     <div style={{
@@ -52,6 +61,7 @@ function SkeletonCard() {
       border: '1px solid rgba(255,255,255,0.75)',
       borderRadius: 14,
       padding: '18px 20px',
+      minHeight: CARD_MIN_HEIGHT,
       animation: 'pulse 1.5s ease-in-out infinite',
     }}>
       <div style={{ height: 10, width: '55%', background: '#e5e7eb', borderRadius: 6, marginBottom: 14 }} />
@@ -75,8 +85,45 @@ const PAYMENT_BADGE = {
 // Stat card definition
 // ---------------------------------------------------------------------------
 
-function buildCards(data, navigate) {
+/**
+ * The three spend categories shown as pills under each expenditure card.
+ * Supplier lumps together money paid at the door and money paid off an older
+ * debt — from the owner's point of view both are "paid the distributor", and
+ * two near-identical pills would only add noise.  The panel still lists them
+ * separately with their own badges.
+ */
+function spendPills(period) {
+  if (!period) return [];
+  const supplier = Number(period.supplier_payments ?? 0) + Number(period.credit_payments ?? 0);
+  return [
+    { icon: '🏪', label: 'Supplier', amount: supplier,                    color: '#0284c7' },
+    { icon: '📋', label: 'Expenses', amount: Number(period.expenses ?? 0), color: '#d97706' },
+    { icon: '👤', label: 'Salary',   amount: Number(period.salary ?? 0),   color: '#059669' },
+  ].filter(p => p.amount > 0);   // hide categories with nothing in them
+}
+
+/**
+ * The 8 stat cards, in the order they appear in the 4-column grid:
+ *
+ *   Row 1 │ Today's Sales · Monthly Sales · Inventory Value · Total Patients
+ *   Row 2 │ Expiry Alerts · Low Stock · Today's Expenditure · Month Expenditure
+ *
+ * Order matters — the grid fills left-to-right, so moving an entry in this
+ * array moves the card on screen.  Keep the count at 8 or the second row will
+ * be ragged.
+ *
+ * A card may optionally carry a `footer`: JSX pinned to the bottom of the card
+ * (see the `marginTop: 'auto'` wrapper in the render below).  Pinning rather
+ * than simply appending is what keeps the headline number of all 8 cards on
+ * the same baseline.
+ */
+function buildCards(data, navigate, spend, openPanel) {
   const month = currentMonthName();
+  // Older backends (before patients_today was added) would leave this
+  // undefined; falling back to zeros keeps the card rendering instead of
+  // crashing the whole dashboard on a property read.
+  const patients = data.patients_today ?? { total: 0, new_patients: 0, returning: 0 };
+
   return [
     {
       label: "Today's Sales",
@@ -117,10 +164,50 @@ function buildCards(data, navigate) {
         </svg>
       ),
     },
+    // ── Footfall: how many patients came in today ──────────────────────
+    // The headline is DISTINCT patients billed today; the footer splits them
+    // into first-timers and repeat customers.  Walk-in sales (no patient
+    // record attached) are not counted — see the backend comment.
+    {
+      label: 'Total Patients',
+      value: patients.total,
+      sub: 'Patients seen today',
+      subColor: '#8b5cf6',
+      gradient: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+      footer: (
+        <div style={{
+          paddingTop: 12,
+          borderTop: '1px solid rgba(0,0,0,0.06)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 12,
+        }}>
+          <div>
+            <span style={{ color: '#94a3b8' }}>New </span>
+            <span style={{ fontWeight: 700, color: '#6366f1' }}>{patients.new_patients}</span>
+          </div>
+          <div>
+            <span style={{ color: '#94a3b8' }}>Returning </span>
+            <span style={{ fontWeight: 700, color: '#10b981' }}>{patients.returning}</span>
+          </div>
+        </div>
+      ),
+      icon: (
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+        </svg>
+      ),
+    },
     {
       label: 'Expiry Alerts',
       value: data.expiry_alerts_count,
-      sub: 'Within 90 days',
+      // 60 days is EXPIRY_ALERT_HORIZON_DAYS in inventory_service.py — the
+      // single constant the sidebar badge, this card and the Expiry Alerts
+      // page all count off.  If that changes, change this label too.
+      sub: 'Within 60 days',
       subColor: '#f43f5e',
       gradient: 'linear-gradient(90deg, #f43f5e, #fb7185)',
       clickable: data.expiry_alerts_count > 0,
@@ -151,17 +238,43 @@ function buildCards(data, navigate) {
         </svg>
       ),
     },
+    // ── Money OUT, today ───────────────────────────────────────────────
+    // Always clickable, even at ₹0 — "nothing went out today" is a useful
+    // thing to be able to confirm, and a dead card would look broken.
     {
-      label: 'New Patients',
-      value: data.new_patients_today,
-      sub: 'Registered today',
-      subColor: '#06b6d4',
-      gradient: 'linear-gradient(90deg, #06b6d4, #22d3ee)',
+      label: "Today's Expenditure",
+      value: formatINR(spend?.today?.total ?? 0),
+      sub: 'Money out today',
+      subColor: '#d97706',
+      gradient: 'linear-gradient(90deg, #d97706, #fbbf24)',
+      clickable: !!spend,
+      onClick: spend ? () => openPanel('today') : undefined,
+      pills: spendPills(spend?.today),
       icon: (
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
-          <circle cx="12" cy="7" r="4"/>
+          <path d="M12 1v22"/>
+          <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+        </svg>
+      ),
+    },
+    // ── Money OUT, this month ──────────────────────────────────────────
+    {
+      label: `${month} Expenditure`,
+      value: formatINR(spend?.month?.total ?? 0),
+      sub: "This month's total",
+      subColor: '#8b5cf6',
+      gradient: 'linear-gradient(90deg, #8b5cf6, #c084fc)',
+      clickable: !!spend,
+      onClick: spend ? () => openPanel('month') : undefined,
+      pills: spendPills(spend?.month),
+      icon: (
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
       ),
     },
@@ -184,6 +297,10 @@ export default function Dashboard() {
   const [creditSummary,     setCreditSummary] = useState(null);
   // Supplier credit = money the pharmacy OWES (opposite direction to the above)
   const [supplierCredit,    setSupplierCredit] = useState(null);
+  // Expenditure = money that has already LEFT the pharmacy (today + this month)
+  const [spend,             setSpend]         = useState(null);
+  // Which expenditure panel is open: null | 'today' | 'month'
+  const [spendPanel,        setSpendPanel]    = useState(null);
 
   useEffect(() => {
     api.get('/dashboard/summary')
@@ -213,7 +330,15 @@ export default function Dashboard() {
       .catch(() => setSupplierCredit(null));
   }, []);
 
-  const cards = data ? buildCards(data, navigate) : [];
+  // Load expenditure (money out) independently — its own request so a failure
+  // here leaves the rest of the dashboard intact.
+  useEffect(() => {
+    api.get('/dashboard/expenditure-summary')
+      .then(({ data: d }) => setSpend(d))
+      .catch(() => setSpend(null));
+  }, []);
+
+  const cards = data ? buildCards(data, navigate, spend, setSpendPanel) : [];
 
   return (
     <div>
@@ -243,14 +368,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Stat cards ────────────────────────────────────────────── */}
-      <div style={{
-        display: 'grid', gap: 16,
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-        marginBottom: 24,
-      }}>
+      {/* ── Stat cards — 2 rows of 4 (grid lives in global.css) ───── */}
+      <div className="stats-grid">
         {loading
-          ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
+          ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
           : cards.map((card) => (
             <div
               key={card.label}
@@ -268,6 +389,14 @@ export default function Dashboard() {
                 overflow: 'hidden',
                 cursor: card.clickable ? 'pointer' : 'default',
                 transition: 'transform 0.15s, box-shadow 0.15s',
+                // height 100% makes every card fill its grid row, so the two
+                // rows are flush even when one card has more content than the
+                // rest.  The flex column below is what lets the footer/pills
+                // block push itself to the bottom with marginTop: 'auto'.
+                height: '100%',
+                minHeight: CARD_MIN_HEIGHT,
+                display: 'flex',
+                flexDirection: 'column',
               }}
               onMouseEnter={(e) => {
                 if (card.clickable) {
@@ -311,10 +440,61 @@ export default function Dashboard() {
               <div style={{ fontSize: 11, color: card.subColor, marginTop: 4 }}>
                 {card.sub}
               </div>
+
+              {/* Bottom block — the new/returning split on the Patients card.
+                  marginTop:'auto' pins it to the bottom of the flex column so
+                  the headline numbers stay aligned across all 8 cards. */}
+              {card.footer && (
+                <div style={{ marginTop: 'auto', paddingTop: 8 }}>
+                  {card.footer}
+                </div>
+              )}
+
+              {/* Category breakdown pills (expenditure cards only).
+                  Pinned to the bottom for the same reason as the footer above.
+                  They wrap rather than shrink, so a long figure like
+                  ₹1,25,000 never gets clipped on a narrow grid column. */}
+              {card.pills?.length > 0 && (
+                <div style={{
+                  display: 'flex', flexWrap: 'wrap', gap: 5,
+                  marginTop: 'auto', paddingTop: 9,
+                }}>
+                  {card.pills.map((pill) => (
+                    <span
+                      key={pill.label}
+                      title={`${pill.label}: ${formatINR(pill.amount)}`}
+                      style={{
+                        fontSize: 10, fontWeight: 600,
+                        padding: '2px 7px', borderRadius: 6,
+                        background: 'rgba(0,0,0,0.04)',
+                        color: pill.color,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {pill.icon} {pill.label} {formatINR(pill.amount)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))
         }
       </div>
+
+      {/* ── Expenditure history panel (slide-in from the right) ────── */}
+      {/*
+        Both cards share ONE panel; `spendPanel` decides which period it shows.
+        The monthly view groups by day, today's view is a flat list.
+      */}
+      <ExpenditurePanel
+        open={spendPanel !== null}
+        onClose={() => setSpendPanel(null)}
+        title={spendPanel === 'month'
+          ? `${currentMonthName()} Expenditure`
+          : "Today's Expenditure"}
+        period={spendPanel === 'month' ? spend?.month : spend?.today}
+        grouped={spendPanel === 'month'}
+      />
 
       {/* ── Follow-Up Alert Widget ────────────────────────────────── */}
       {followUpCount !== null && followUpCount > 0 && (

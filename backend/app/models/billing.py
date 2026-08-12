@@ -14,7 +14,7 @@ KEY DESIGN NOTE:
   unit_price, purchase_price, and gst_rate are SNAPSHOTTED at sale time.
   Future changes to a product's price or GST rate must NOT affect old invoices.
 """
-from sqlalchemy import Column, Date, ForeignKey, Integer, Numeric, String, Text, TIMESTAMP  # noqa: F401
+from sqlalchemy import Boolean, Column, Date, ForeignKey, Integer, Numeric, String, Text, TIMESTAMP  # noqa: F401
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -40,7 +40,18 @@ class Invoice(Base):
     amount_paid     = Column(Numeric(12, 2), nullable=True, default=0)    # paid upfront (for CREDIT mode)
     credit_amount   = Column(Numeric(12, 2), nullable=True, default=0)    # amount owed on credit
     credit_due_date = Column(Date, nullable=True)                          # when credit is due
-    status          = Column(String(20), nullable=False, default="COMPLETED")  # or 'RETURNED'
+    # 'COMPLETED' · 'PARTIAL_RETURN' (some units came back) · 'RETURNED' (all did)
+    status          = Column(String(20), nullable=False, default="COMPLETED")
+    # Running total of every rupee refunded against this invoice.
+    #
+    # WHY IT IS STORED RATHER THAN DERIVED: every revenue query in the app sums
+    # Invoice.total_amount, and after a partial return that figure is no longer
+    # what the customer is left having paid.  Deriving the refund on the fly
+    # needs each line's share of the bill-level discount — a correlated subquery
+    # in every dashboard card, to recompute something process_return already
+    # worked out.  Written by billing_service.process_return; read through
+    # services/revenue.net_invoice_amount_expr().
+    refunded_amount = Column(Numeric(12, 2), nullable=True, default=0)
     referred_by     = Column(String(120), nullable=True)   # doctor/referrer name (optional)
     # --- Home visit / drip administration charge (Feature 4) ----------------
     # A flat service fee added to the bill when the pharmacist administers a
@@ -89,6 +100,19 @@ class InvoiceItem(Base):
     line_total     = Column(Numeric(12, 2), nullable=False)   # qty * unit_price * (1 + gst_rate/100)
     # Phase 3.3: estimated date when this purchased supply will run out (for refill reminders)
     estimated_finish_date = Column(Date, nullable=True)
+
+    # --- Partial returns ----------------------------------------------------
+    # A customer routinely brings back ONE medicine off a five-line bill, so a
+    # return is per LINE, not per invoice.  returned_qty is how many of this
+    # line's units have come back so far (a line can be returned in more than
+    # one visit); is_returned is the convenience flag for "this line is fully
+    # back", i.e. returned_qty == quantity.
+    #
+    # The pair is deliberately NOT a single "returned" boolean: the still-sellable
+    # remainder of a partly returned line has to stay on the invoice, priced and
+    # taxed exactly as it was sold, or the invoice stops reconciling.
+    returned_qty   = Column(Integer, nullable=False, default=0, server_default="0")
+    is_returned    = Column(Boolean, nullable=False, default=False, server_default="0")
 
     invoice = relationship("Invoice", back_populates="items")
     batch   = relationship("Batch",   foreign_keys=[batch_id],   lazy="joined")

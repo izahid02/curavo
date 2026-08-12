@@ -27,6 +27,7 @@ from app.models.inventory import Department, Product
 from app.models.patients import Patient, Tag
 from app.schemas.billing import InvoiceItemOut, InvoiceOut
 from app.schemas.inventory import DepartmentOut
+from app.services.revenue import net_invoice_amount_expr
 from app.schemas.patients import (
     FollowUpSummaryOut,
     PatientCreate,
@@ -378,15 +379,22 @@ def get_patient_summary(db: Session, patient_id: int) -> PatientSummaryOut:
         raise HTTPException(status_code=404, detail=f"Patient {patient_id} not found")
 
     # ── 2. Visit stats — one aggregate query ──────────────────────────────────
-    # total_spent sums only COMPLETED invoices; returns/walk-ins are excluded.
     # total_visits counts all invoice rows (each visit = one invoice event).
+    #
+    # total_spent excludes fully RETURNED invoices and nets any refund off the
+    # rest.  ⚠ This used to test `status == "COMPLETED"`, which was the ONLY
+    # place in the app that dropped a partially-returned invoice to ZERO — a
+    # patient who returned one item off a ₹2,000 bill lost the whole ₹2,000 from
+    # their lifetime spend, which then quietly mis-ranked them everywhere this
+    # figure is read.  Testing `!= "RETURNED"` keeps the sale that stuck, and
+    # net_invoice_amount_expr() removes only what was actually handed back.
     visit_row = (
         db.query(
             func.count(Invoice.id).label("total_visits"),
             func.max(Invoice.invoice_date).label("last_visit"),
             func.min(Invoice.invoice_date).label("first_visit"),
             func.sum(
-                case((Invoice.status == "COMPLETED", Invoice.total_amount), else_=0)
+                case((Invoice.status != "RETURNED", net_invoice_amount_expr()), else_=0)
             ).label("total_spent"),
         )
         .filter(Invoice.patient_id == patient_id)

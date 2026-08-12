@@ -340,7 +340,7 @@ function ReportTable({ columns, rows, emptyMsg = 'No data' }) {
 // ---------------------------------------------------------------------------
 // Stat card
 // ---------------------------------------------------------------------------
-function StatCard({ label, value, topColor, sub }) {
+function StatCard({ label, value, topColor, sub, valueColor }) {
   return (
     <div style={{
       background: 'var(--glass)',
@@ -356,7 +356,9 @@ function StatCard({ label, value, topColor, sub }) {
         letterSpacing: '0.06em', color: 'var(--text-hint)', marginBottom: 6 }}>
         {label}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>
+      {/* valueColor lets a loss-making figure show in red — see the profit
+          cards, where a heavily discounted period can go negative. */}
+      <div style={{ fontSize: 22, fontWeight: 700, color: valueColor || 'var(--text)', lineHeight: 1.2 }}>
         {value}
       </div>
       {sub && (
@@ -409,8 +411,13 @@ function SalesTab({ data }) {
       {/* Summary cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
         <StatCard label="Total Revenue" value={formatINR(s.total_revenue)} topColor="#6366f1" />
-        <StatCard label="Gross Profit"  value={formatINR(s.gross_profit)}  topColor="#059669" />
-        <StatCard label="Profit Margin" value={formatPct(s.profit_margin_pct)} topColor="#0284c7" />
+        {/* Profit is post-discount and can be negative — show a loss in red. */}
+        <StatCard label="Gross Profit"  value={formatINR(s.gross_profit)}
+          topColor={s.gross_profit >= 0 ? '#059669' : 'var(--danger)'}
+          valueColor={s.gross_profit >= 0 ? undefined : 'var(--danger)'} />
+        <StatCard label="Profit Margin" value={formatPct(s.profit_margin_pct)}
+          topColor={s.profit_margin_pct >= 0 ? '#0284c7' : 'var(--danger)'}
+          valueColor={s.profit_margin_pct >= 0 ? undefined : 'var(--danger)'} />
         <StatCard label="Total Invoices" value={s.total_invoices} topColor="#0d9488" />
       </div>
 
@@ -431,7 +438,13 @@ function SalesTab({ data }) {
                 { key: 'date',           label: 'Date' },
                 { key: 'revenue',        label: 'Revenue',  align: 'right', render: r => formatINR(r.revenue) },
                 { key: 'invoices_count', label: 'Invoices', align: 'right' },
-                { key: 'profit',         label: 'Profit',   align: 'right', render: r => formatINR(r.profit) },
+                { key: 'profit',         label: 'Profit',   align: 'right',
+                  render: r => (
+                    <span style={{ color: r.profit >= 0 ? 'var(--ok)' : 'var(--danger)', fontWeight: 600 }}>
+                      {formatINR(r.profit)}
+                    </span>
+                  ),
+                },
               ]}
               rows={daily}
               emptyMsg="No sales in this period"
@@ -449,7 +462,13 @@ function SalesTab({ data }) {
                 { key: 'product_name', label: 'Product' },
                 { key: 'units_sold',   label: 'Units', align: 'right' },
                 { key: 'revenue',      label: 'Revenue', align: 'right', render: r => formatINR(r.revenue) },
-                { key: 'profit',       label: 'Profit',  align: 'right', render: r => formatINR(r.profit) },
+                { key: 'profit',       label: 'Profit',  align: 'right',
+                  render: r => (
+                    <span style={{ color: r.profit >= 0 ? 'var(--ok)' : 'var(--danger)', fontWeight: 600 }}>
+                      {formatINR(r.profit)}
+                    </span>
+                  ),
+                },
               ]}
               rows={(data.top_products || []).map((r, i) => ({ ...r, _num: i + 1 }))}
               emptyMsg="No sales in this period"
@@ -614,11 +633,21 @@ function ProfitTab({ data }) {
         </div>
       )}
 
-      {/* Summary cards */}
+      {/* Summary cards.
+          A period can genuinely LOSE money — heavy discounts mean stock left
+          the shelf for less than it cost.  When that happens the card turns
+          red rather than showing a loss in the usual "healthy" green, so it
+          cannot be misread at a glance. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-        <StatCard label="Gross Profit"  value={formatINR(s.gross_profit)}       topColor="#059669" />
-        <StatCard label="Profit Margin" value={formatPct(s.profit_margin_pct)}  topColor="#0284c7" />
-        <StatCard label="Net Profit"    value={formatINR(s.net_profit)}          topColor="#6366f1" />
+        <StatCard label="Gross Profit"  value={formatINR(s.gross_profit)}
+          topColor={s.gross_profit >= 0 ? '#059669' : 'var(--danger)'}
+          valueColor={s.gross_profit >= 0 ? undefined : 'var(--danger)'} />
+        <StatCard label="Profit Margin" value={formatPct(s.profit_margin_pct)}
+          topColor={s.profit_margin_pct >= 0 ? '#0284c7' : 'var(--danger)'}
+          valueColor={s.profit_margin_pct >= 0 ? undefined : 'var(--danger)'} />
+        <StatCard label="Net Profit"    value={formatINR(s.net_profit)}
+          topColor={s.net_profit >= 0 ? '#6366f1' : 'var(--danger)'}
+          valueColor={s.net_profit >= 0 ? undefined : 'var(--danger)'} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -637,7 +666,13 @@ function ProfitTab({ data }) {
                   </span>
                 ),
               },
-              { key: 'margin_pct', label: 'Margin', align: 'right', render: r => formatPct(r.margin_pct) },
+              { key: 'margin_pct', label: 'Margin', align: 'right',
+                render: r => (
+                  <span style={{ color: r.margin_pct >= 0 ? 'var(--text)' : 'var(--danger)', fontWeight: 600 }}>
+                    {formatPct(r.margin_pct)}
+                  </span>
+                ),
+              },
             ]}
             rows={data.monthly_trend || []}
             emptyMsg="No monthly data yet"
@@ -673,7 +708,13 @@ function ProfitTab({ data }) {
                     </span>
                   ),
                 },
-                { key: 'margin_pct',   label: 'Margin', align: 'right', render: r => formatPct(r.margin_pct) },
+                { key: 'margin_pct',   label: 'Margin', align: 'right',
+                  render: r => (
+                    <span style={{ color: r.margin_pct >= 0 ? 'var(--text)' : 'var(--danger)', fontWeight: 600 }}>
+                      {formatPct(r.margin_pct)}
+                    </span>
+                  ),
+                },
               ]}
               rows={(data.product_profitability || []).map((r, i) => ({ ...r, _num: i + 1 }))}
               emptyMsg="No sales in this period"

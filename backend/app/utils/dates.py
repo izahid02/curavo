@@ -64,3 +64,81 @@ def ist_range_bounds_utc(date_from: date, date_to: date) -> tuple[datetime, date
     start_utc, _ = ist_day_bounds_utc(date_from)
     _, end_utc = ist_day_bounds_utc(date_to)
     return start_utc, end_utc
+
+
+# ---------------------------------------------------------------------------
+# Named periods — "today", "this week", "this month"
+# ---------------------------------------------------------------------------
+#
+# WHY THESE LIVE HERE AND NOT IN THE BROWSER:
+# The Invoice History page used to work out "this week" in JavaScript and send
+# a date_from/date_to pair.  That put the definition of a week on the PC's
+# clock and timezone, so a shop machine set to anything but IST could ask for a
+# window that did not contain the invoices the pharmacist had just created.
+# Now the browser sends a NAME ("week") and the server, which is the only thing
+# that knows how the timestamps were stored, turns it into a UTC window.
+
+# The periods the API accepts.  "all" means no date filter at all.
+INVOICE_PERIODS = ("today", "yesterday", "week", "month", "all")
+
+
+def ist_week_bounds_utc(day: date | None = None) -> tuple[datetime, datetime]:
+    """
+    UTC [start, end) window for the IST week containing `day` (today by default).
+
+    The week starts on MONDAY — `weekday()` is 0 for Monday, so subtracting it
+    walks back to the start of the week — and runs through Sunday.  Using the
+    whole week (not "Monday → today") means an invoice dated later today, or a
+    clock a few minutes ahead, still falls inside the window.
+    """
+    if day is None:
+        day = get_today_ist()
+    start_of_week = day - timedelta(days=day.weekday())   # Monday
+    end_of_week = start_of_week + timedelta(days=6)       # Sunday
+    return ist_range_bounds_utc(start_of_week, end_of_week)
+
+
+def ist_month_bounds_utc(day: date | None = None) -> tuple[datetime, datetime]:
+    """
+    UTC [start, end) window for the IST calendar month containing `day`.
+
+    Runs from the 1st to the last day of that month.  Finding the last day by
+    stepping to the 1st of the NEXT month and going back one day avoids having
+    to know month lengths or leap years.
+    """
+    if day is None:
+        day = get_today_ist()
+    start_of_month = day.replace(day=1)
+    # Jump into the next month (December rolls the year over), then step back
+    # one day to land on the last day of THIS month.
+    if start_of_month.month == 12:
+        next_month = start_of_month.replace(year=start_of_month.year + 1, month=1)
+    else:
+        next_month = start_of_month.replace(month=start_of_month.month + 1)
+    end_of_month = next_month - timedelta(days=1)
+    return ist_range_bounds_utc(start_of_month, end_of_month)
+
+
+def period_bounds_utc(period: str) -> tuple[datetime, datetime] | None:
+    """
+    Turn a period NAME into the UTC window to filter a stored timestamp with.
+
+    Returns None for "all" (and for anything unrecognised), which callers read
+    as "apply no date filter".
+
+        "today"     → today in IST
+        "yesterday" → the IST day before today
+        "week"      → Monday–Sunday of the current IST week
+        "month"     → 1st to last day of the current IST month
+        "all"       → None
+    """
+    period = (period or "").strip().lower()
+    if period == "today":
+        return ist_day_bounds_utc(get_today_ist())
+    if period == "yesterday":
+        return ist_day_bounds_utc(get_today_ist() - timedelta(days=1))
+    if period == "week":
+        return ist_week_bounds_utc()
+    if period == "month":
+        return ist_month_bounds_utc()
+    return None

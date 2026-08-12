@@ -45,11 +45,16 @@ function Field({ label, value, onChange, placeholder, required, type = 'text' })
   );
 }
 
+// Shared column template for the supplier table — the header row and the data
+// rows are two separate grids, so they MUST use the same string or they drift
+// out of alignment the moment a column is added.
+const SUPPLIER_COLS = '1.7fr 1.2fr 1fr 1.2fr 1.2fr 70px 90px';
+
 // ---------------------------------------------------------------------------
 // Add / Edit modal
 // ---------------------------------------------------------------------------
 
-const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', gst_number: '' };
+const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', gst_number: '', dl_number: '' };
 
 function SupplierModal({ supplier, onClose, onSaved }) {
   // If "supplier" is passed in we are editing; otherwise we are adding.
@@ -61,6 +66,7 @@ function SupplierModal({ supplier, onClose, onSaved }) {
     phone:          supplier.phone          ?? '',
     address:        supplier.address        ?? '',
     gst_number:     supplier.gst_number     ?? '',
+    dl_number:      supplier.dl_number      ?? '',
   } : { ...EMPTY_FORM });
   const [saving, setSaving]   = useState(false);
   const [error,  setError]    = useState('');
@@ -133,6 +139,9 @@ function SupplierModal({ supplier, onClose, onSaved }) {
           <Field label="Contact Person" value={form.contact_person} onChange={set('contact_person')} placeholder="e.g. Rajesh Kumar" />
           <Field label="Phone"          value={form.phone}          onChange={set('phone')}          placeholder="e.g. 9876543210" type="tel" />
           <Field label="GST Number"     value={form.gst_number}     onChange={set('gst_number')}     placeholder="15-digit GSTIN" />
+          {/* Drug Licence number — every medicine distributor must hold one and
+              the pharmacy has to be able to produce it during an inspection. */}
+          <Field label="DL Number"      value={form.dl_number}      onChange={set('dl_number')}      placeholder="e.g. 20B/21B-MH-12345" />
           <Field label="Address"        value={form.address}        onChange={set('address')}        placeholder="Full address" type="textarea" />
 
           {error && (
@@ -379,7 +388,7 @@ export default function Suppliers() {
         {/* Table header */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '2fr 1.5fr 1.2fr 1.4fr 80px 90px',
+          gridTemplateColumns: SUPPLIER_COLS,
           padding: '12px 20px',
           borderBottom: '1px solid rgba(0,0,0,0.06)',
           fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
@@ -389,6 +398,7 @@ export default function Suppliers() {
           <span>Contact Person</span>
           <span>Phone</span>
           <span>GST Number</span>
+          <span>DL Number</span>
           <span style={{ textAlign: 'center' }}>Batches</span>
           <span style={{ textAlign: 'right' }}>Actions</span>
         </div>
@@ -413,7 +423,7 @@ export default function Suppliers() {
               key={s.id}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1.5fr 1.2fr 1.4fr 80px 90px',
+                gridTemplateColumns: SUPPLIER_COLS,
                 padding: '13px 20px',
                 borderBottom: '1px solid rgba(0,0,0,0.04)',
                 alignItems: 'center',
@@ -440,6 +450,11 @@ export default function Suppliers() {
               {/* GST Number */}
               <span style={{ fontSize: 12, color: '#6366f1', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
                 {s.gst_number || <span style={{ color: '#d1d5db', fontFamily: 'inherit', letterSpacing: 0 }}>—</span>}
+              </span>
+
+              {/* DL (Drug Licence) Number */}
+              <span style={{ fontSize: 12, color: '#059669', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+                {s.dl_number || <span style={{ color: '#d1d5db', fontFamily: 'inherit', letterSpacing: 0 }}>—</span>}
               </span>
 
               {/* Batch count badge */}

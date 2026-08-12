@@ -74,6 +74,7 @@ class SupplierBrief(BaseModel):
     phone:          Optional[str] = None
     contact_person: Optional[str] = None
     gst_number:     Optional[str] = None
+    dl_number:      Optional[str] = None
 
 
 class AccountBrief(BaseModel):

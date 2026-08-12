@@ -17,6 +17,7 @@ import FollowUps from './pages/FollowUps.jsx';
 import Marketing from './pages/Marketing.jsx';
 import Credit from './pages/Credit.jsx';
 import Expenditure from './pages/Expenditure.jsx';
+import Backup from './pages/Backup.jsx';
 
 /**
  * Detect whether we are running inside the Tauri desktop shell (as opposed to
@@ -116,6 +117,7 @@ export default function App() {
         <Route path="/suppliers"     element={<Suppliers />} />
         <Route path="/expenditure"   element={<Expenditure />} />
         <Route path="/reports"       element={<Reports />} />
+        <Route path="/backup"        element={<Backup />} />
         <Route path="/follow-ups"   element={<FollowUps />} />
         <Route path="/marketing"    element={<Marketing />} />
         <Route path="/credit"       element={<Credit />} />

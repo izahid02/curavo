@@ -32,6 +32,8 @@
  */
 import '../../styles/thermal-print.css';
 import { formatDateTime as fmtDateTimeIST, formatDateOnly as fmtDateIST } from '../../lib/datetime';
+import { usePharmacy } from '../../lib/pharmacy.jsx';
+import ARZLogo from '../shared/ARZLogo';
 
 // ─── Small formatting helpers ────────────────────────────────────────────────
 
@@ -55,6 +57,11 @@ function formatDate(value) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ThermalReceipt({ receipt }) {
+  // The shop's own name/address/GSTIN for the header, from Pharmacy Settings.
+  // ⚠ This hook MUST come before the early return below — React requires the
+  // same hooks to run on every render, and `receipt` is null between sales.
+  const { pharmacy } = usePharmacy();
+
   // Nothing to show until a sale has been completed.
   if (!receipt) return null;
 
@@ -64,12 +71,29 @@ export default function ThermalReceipt({ receipt }) {
   return (
     <div id="thermal-receipt">
 
-      {/* Header */}
+      {/* Header — the shop's own identity, from Pharmacy Settings.
+          Uppercased for the thermal printer, which has no bold and relies on
+          caps for the one line that has to stand out. */}
       <div className="receipt-header">
-        <img src="/HCC_LOGO.png" alt="HCC" className="receipt-logo" />
-        <div className="receipt-shop-name">HEALTH CARE CENTRE</div>
-        <div className="receipt-tagline">Pharmacy &amp; Medical Store</div>
-        <div className="receipt-tagline">Your Health is Our Priority</div>
+        <img src="/HCC_LOGO.png" alt="Logo" className="receipt-logo" />
+        <div className="receipt-shop-name">{pharmacy.pharmacy_name.toUpperCase()}</div>
+        {pharmacy.pharmacy_tagline && (
+          <div className="receipt-tagline">{pharmacy.pharmacy_tagline}</div>
+        )}
+        {pharmacy.pharmacy_address && (
+          <div className="receipt-tagline">{pharmacy.pharmacy_address}</div>
+        )}
+        {pharmacy.pharmacy_phone && (
+          <div className="receipt-tagline">Ph: {pharmacy.pharmacy_phone}</div>
+        )}
+        {/* GSTIN and the Drug Licence number are legally required on a
+            pharmacy's bill, so they print whenever they have been entered. */}
+        {pharmacy.pharmacy_gstin && (
+          <div className="receipt-tagline">GSTIN: {pharmacy.pharmacy_gstin}</div>
+        )}
+        {pharmacy.pharmacy_dl_number && (
+          <div className="receipt-tagline">DL No: {pharmacy.pharmacy_dl_number}</div>
+        )}
       </div>
 
       <hr className="receipt-divider" />
@@ -173,8 +197,28 @@ export default function ThermalReceipt({ receipt }) {
         <div>Thank you for your visit!</div>
         <div>Your health is our priority</div>
         <hr className="receipt-divider" />
-        <div>Health Care Centre © {new Date().getFullYear()}</div>
-        <div>Powered by ARZ Technologies</div>
+        <div>{pharmacy.pharmacy_name} © {new Date().getFullYear()}</div>
+
+        {/* ── "Powered by" ARZ Technologies logo ──────────────────────────
+            Replaces the old plain-text line. Kept small (28px) so it fits
+            neatly across 80mm thermal paper. */}
+        <div style={{
+          textAlign: 'center',
+          marginTop: '8px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '4px',
+        }}>
+          <span style={{
+            fontSize: '8px',
+            letterSpacing: '0.08em',
+            color: '#666',
+          }}>
+            Powered by
+          </span>
+          <ARZLogo size="lg" />
+        </div>
       </div>
 
     </div>

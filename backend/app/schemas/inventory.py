@@ -291,6 +291,90 @@ class BatchOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Medicine batch panel (slide-in panel on the Medicines page)
+# ---------------------------------------------------------------------------
+#
+# BatchOut above is the plain batch record.  The panel needs MORE than that:
+# it shows what each batch actually COST us so the pharmacist can see the
+# margin per batch.  Cost lives on stock_purchases (the Add Stock record), not
+# on the batch, so these schemas carry the joined figures too.
+
+class ProductBatchDetail(BaseModel):
+    """
+    One batch as the slide-in Medicine Batch panel needs it: the batch itself,
+    plus the purchase figures joined in from stock_purchases.
+
+    PRICE BASIS — read this before using any of the money fields:
+      selling_price / mrp / unit_mrp / purchase_price are ALL PER INDIVIDUAL
+      UNIT (one tablet), because that is how the batch stores them.  strip_mrp
+      is the only per-strip figure, and it is DERIVED (unit price × units per
+      strip), not stored on the batch.  The frontend scales purchase_price by
+      units_per_strip itself when it wants a per-strip cost.
+    """
+    batch_id:           int
+    batch_number:       Optional[str]
+    quantity_available: int          # individual units on the shelf right now
+    quantity_received:  int          # units when the batch first arrived
+    expiry_date:        date
+    days_to_expiry:     int          # negative if already expired
+    expiry_status:      str          # OK / WARN_90 / WARN_60 / WARN_30 / WARN_7 / EXPIRED
+
+    # --- Pricing (all per unit unless the name says otherwise) --------------
+    mrp:                Decimal
+    selling_price:      Decimal
+    unit_mrp:           Optional[Decimal] = None   # = selling_price, named for the UI
+    strip_mrp:          Optional[Decimal] = None   # selling_price × units_per_strip
+
+    # --- Purchase scheme (Feature B) ---------------------------------------
+    scheme_label:       Optional[str] = None
+    bonus_quantity:     int = 0
+    paid_quantity:      Optional[int] = None
+
+    # --- What we paid, joined from stock_purchases -------------------------
+    # purchase_price is the PRE-TAX cost of one unit.  None means we genuinely
+    # do not know (old batches recorded before cost price became mandatory) —
+    # the panel shows "—" rather than inventing a margin from a zero.
+    purchase_price:     Optional[Decimal] = None
+    gst_on_purchase:    Optional[Decimal] = None
+    total_cost:         Optional[Decimal] = None
+    # The trade discount that was recorded against this delivery, so the Edit
+    # Batch form opens showing what is actually stored rather than defaulting to
+    # zero and silently wiping a discount on the next save.
+    discount_percent:   Optional[Decimal] = None
+
+    # Derived, not stored: a batch is "active" when it still has stock AND has
+    # not expired.  Expired stock cannot be sold (see CLAUDE.md § FEFO).
+    is_active:          bool
+
+
+class ProductBatchesProduct(BaseModel):
+    """The medicine identity fields the panel header shows above the table."""
+    id:              int
+    name:            str
+    generic_name:    Optional[str] = None
+    hsn_code:        Optional[str] = None
+    gst_rate:        Decimal
+    is_strip:        bool = False
+    units_per_strip: Optional[int] = None
+    strip_mrp:       Optional[Decimal] = None
+    unit_mrp:        Optional[Decimal] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProductBatchesOut(BaseModel):
+    """
+    Response for GET /api/inventory/products/{id}/batches.
+
+    The product block is bundled in so the panel can render its header (generic
+    name · GST · HSN) from ONE request — the product-list endpoint the table is
+    built from does not carry hsn_code.
+    """
+    product: ProductBatchesProduct
+    batches: list[ProductBatchDetail]
+
+
+# ---------------------------------------------------------------------------
 # Add Stock (unified Medicines page flow)
 # ---------------------------------------------------------------------------
 
@@ -316,6 +400,21 @@ class AddStockRequest(BaseModel):
     mrp:                     Decimal = Field(..., gt=0, description="Max retail price printed on the pack")
     # Optional — only recorded when the pharmacist knows what we paid.
     cost_price:              Optional[Decimal] = Field(default=None, ge=0)
+
+    # --- Supplier discount --------------------------------------------------
+    # A distributor's trade discount, ALWAYS as a percentage of the rate ("5%").
+    #
+    # There used to be a second field for a flat rupee discount.  It is gone: a
+    # rupee figure has to be stated in a basis (per tablet? per strip? per
+    # line?) and every one of those bases needed its own conversion before the
+    # backend could use it, which is exactly the kind of mismatch that quietly
+    # mis-states a supplier debt.  A percentage means the same thing in every
+    # basis, so it is the only shape accepted.  The rupee amount stored on
+    # stock_purchases is DERIVED from it (see compute_purchase_totals).
+    #
+    # Money is Decimal, never float (CLAUDE.md § coding conventions) — this
+    # field feeds effective_cost, which feeds every profit and loss figure.
+    discount_percent:        Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
     # --- Strip pricing (Feature 3) ------------------------------------------
     # Price of a WHOLE strip and of ONE unit.  Sent only for strip medicines so
@@ -359,6 +458,58 @@ class AddStockRequest(BaseModel):
     scheme_label:            Optional[str] = Field(default=None, max_length=20)
 
 
+class BatchUpdateRequest(BaseModel):
+    """
+    Correct a batch that was entered wrongly — PUT /api/inventory/batches/{id}.
+
+    WHY THIS EXISTS:
+    Add Stock is typed in at the counter while a delivery is being unpacked, so
+    a wrong batch number, a transposed quantity or the wrong expiry month gets
+    saved regularly.  Without an edit the only remedy was a second batch and a
+    stock figure nobody trusted.
+
+    Every field is OPTIONAL: send only what changed.  The prices are always
+    PER UNIT (never per strip) — the frontend divides a strip price by
+    units_per_strip before sending, exactly as Add Stock does, because the
+    backend never receives the word "strip".
+
+    ⚠ THIS IS A CORRECTION, NOT A DELIVERY.  Changing `quantity` does not
+    receive more stock; it restates what the batch was always supposed to hold,
+    and the difference is written as a StockMovement(type='ADJUST').
+    """
+    batch_number:     Optional[str] = Field(default=None, min_length=1, max_length=60)
+    # The CURRENT available quantity, in individual units.
+    quantity:         Optional[int] = Field(default=None, ge=0)
+    # "YYYY-MM" like Add Stock — a pack prints a month, not a day.
+    expiry_date:      Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+    # MRP per unit (GST-inclusive, as printed on the pack).
+    selling_price:    Optional[Decimal] = Field(default=None, gt=0)
+    # The S.Rate per unit: ex-GST, PRE-discount, as the distributor's rate card
+    # states it.  Same meaning as cost_price on stock_purchases.
+    purchase_price:   Optional[Decimal] = Field(default=None, ge=0)
+    discount_percent: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    scheme_label:     Optional[str] = Field(default=None, max_length=20)
+    # Strip MRP, for display on the product record.  Ignored for non-strip
+    # medicines, exactly as in AddStockRequest.
+    strip_mrp:        Optional[Decimal] = Field(default=None, ge=0)
+
+
+class BatchUpdateResponse(BaseModel):
+    """What changed, so the batch panel can show a meaningful confirmation."""
+    success:            bool
+    batch_id:           int
+    message:            str
+    # The stock delta this edit wrote as an ADJUST movement (0 = quantity
+    # untouched).  Negative means stock was written DOWN.
+    quantity_delta:     int = 0
+    new_total_stock:    int = 0
+    # Recomputed purchase figures, so the panel's margin refreshes without
+    # a second request.
+    effective_cost:     Optional[Decimal] = None
+    gst_on_purchase:    Optional[Decimal] = None
+    total_cost:         Optional[Decimal] = None
+
+
 class AddStockResponse(BaseModel):
     """Result returned after a successful Add Stock submission."""
     success:            bool
@@ -383,6 +534,20 @@ class AddStockResponse(BaseModel):
     bonus_quantity:          int = 0
     total_quantity:          Optional[int] = None
     effective_cost_per_unit: Optional[Decimal] = None
+    # --- GST on the purchase ------------------------------------------------
+    # The supplier takes the trade discount off the rate first, then bills GST
+    # on what is left.  Echoed back so the panel can show the same breakdown it
+    # previewed, straight from what was actually stored.  All three are LINE
+    # totals for this delivery, not per-unit prices.
+    base_cost:               Decimal = Decimal("0")   # goods value, post-discount, ex-GST
+    gst_on_purchase:         Decimal = Decimal("0")   # GST on that goods value
+    total_cost:              Decimal = Decimal("0")   # base + GST = what we owe
+    # --- Supplier discount --------------------------------------------------
+    # Echoed back per unit so the panel can confirm "effective cost ₹57.00"
+    # against the figure that was actually stored.
+    discount_percent:        Decimal = Decimal("0")
+    discount_amount:         Decimal = Decimal("0")   # per unit
+    effective_cost:          Optional[Decimal] = None  # cost_price − discount
 
 
 # ---------------------------------------------------------------------------

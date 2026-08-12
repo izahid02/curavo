@@ -2,14 +2,21 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
+import { PharmacyProvider } from './lib/pharmacy.jsx'
 import './styles/global.css'
 import './styles/print.css'
 
 // This is where React "starts" and attaches to the page.
+//
+// PharmacyProvider sits OUTSIDE the router on purpose: the shop's name is shown
+// on the login screen too, which is not inside the app shell, and loading it
+// once here means every screen reads the same values.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <PharmacyProvider>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </PharmacyProvider>
   </React.StrictMode>
 )

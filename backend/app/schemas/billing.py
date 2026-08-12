@@ -24,12 +24,25 @@ from pydantic import BaseModel, Field
 
 class BillItem(BaseModel):
     """
-    One line in the cashier's bill — just the product and how many units.
-    The server looks up the price from the FEFO batch automatically.
-    We do NOT accept a price from the frontend to prevent price manipulation.
+    One line in the cashier's bill — the product, how many units, and
+    (optionally) WHICH physical batch the pharmacist took off the shelf.
+
+    The server always looks the PRICE up from the batch itself.  We do NOT
+    accept a price from the frontend, to prevent price manipulation.
+
+    batch_id: the medicine search now lists one row per batch, so the
+    pharmacist picks the exact box they are holding and we record that choice
+    instead of guessing.  It is optional — older clients and the barcode path
+    may omit it, in which case the server falls back to plain FEFO.  When it
+    IS given, that batch is deducted first; only a shortfall spills over into
+    the next-expiring batches.
     """
     product_id: int
     quantity:   int = Field(..., gt=0, description="Must be at least 1")
+    batch_id:   Optional[int] = Field(
+        default=None,
+        description="Specific batch chosen in the search dropdown. Falls back to FEFO if omitted.",
+    )
 
 
 class CreateInvoiceRequest(BaseModel):
@@ -59,9 +72,30 @@ class CreateInvoiceRequest(BaseModel):
     home_visit_notes:  Optional[str]  = None
 
 
+class ReturnItem(BaseModel):
+    """
+    One line the customer is bringing back.
+
+    invoice_item_id identifies the exact line — NOT the product.  A medicine
+    split across two batches by FEFO is two invoice_items with two different
+    expiry dates, and the units coming back belong to one of them specifically.
+    """
+    invoice_item_id: int
+    return_qty:      int = Field(..., gt=0, description="Units of this line being returned")
+
+
 class ReturnRequest(BaseModel):
-    """Optional reason for returning an invoice (captured for the audit log)."""
-    reason: Optional[str] = None
+    """
+    What the return modal sends.
+
+    items: the lines (and quantities) actually being returned.  Omitting it —
+    or sending an empty list — returns everything still outstanding on the
+    invoice, which is what the old whole-invoice button did, so older clients
+    keep working.
+    reason: captured for the audit log.
+    """
+    items:  Optional[list[ReturnItem]] = None
+    reason: Optional[str]              = None
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +108,17 @@ class InvoiceItemOut(BaseModel):
     computed fields — they are derived from stored data, not stored separately,
     but we compute them here so the frontend doesn't have to.
     """
+    # The invoice_items row id.  The return modal needs it to name exactly which
+    # line is coming back — two batches of the same medicine are two lines.
+    # Optional so callers that build an InvoiceItemOut by hand stay valid.
+    id:             Optional[int] = None
     product_name:   str
     batch_number:   Optional[str]
     quantity:       int
+    # How many of this line have already been returned, and whether the whole
+    # line is back.  The modal caps the "Return qty" box at quantity − returned_qty.
+    returned_qty:   int  = 0
+    is_returned:    bool = False
     unit_price:     Decimal
     purchase_price: Decimal   # snapshot — used for profit calculation
     gst_rate:       Decimal

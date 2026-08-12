@@ -258,6 +258,89 @@ def record_payment(
     return account
 
 
+def reduce_invoice_credit(
+    db: Session,
+    invoice_id: int,
+    amount: Decimal,
+    user_id: int | None = None,
+) -> Decimal:
+    """
+    Cancel part of the credit raised by an invoice, because those goods came back.
+
+    WHY THIS IS NOT record_payment():
+    A payment means the patient handed over money — it grows total_paid and
+    belongs in the cash reconciliation.  A return means the debt should never
+    have existed: no money moved in either direction.  Booking it as a payment
+    would show cash arriving at the counter that nobody ever received.
+    So this walks the debt DOWN instead: the CREDIT transaction's amount and
+    balance shrink, and so does the account's total_credit and outstanding.
+
+    Returns how much was actually cancelled, which is capped at the invoice's
+    remaining balance — a return worth more than the outstanding debt cannot
+    push the account into negative territory.  (The rest of such a refund is
+    money the patient already paid, and is handed back at the counter.)
+    """
+    if amount <= 0:
+        return Decimal("0")
+
+    # Every open CREDIT row raised by this invoice, oldest first.
+    txs = (
+        db.query(CreditTransaction)
+        .filter(
+            CreditTransaction.invoice_id == invoice_id,
+            CreditTransaction.type == "CREDIT",
+        )
+        .order_by(CreditTransaction.created_at)
+        .all()
+    )
+    if not txs:
+        return Decimal("0")
+
+    patient_id = txs[0].patient_id
+    account = get_or_create_account(db, patient_id)
+
+    remaining = Decimal(str(amount))
+    cancelled = Decimal("0")
+
+    for tx in txs:
+        if remaining <= 0:
+            break
+        take = min(tx.balance, remaining)
+        if take <= 0:
+            continue
+
+        tx.amount  = tx.amount - take
+        tx.balance = tx.balance - take
+        remaining -= take
+        cancelled += take
+
+        if tx.balance <= 0:
+            tx.status = "CLEARED"
+            # Nothing left to chase, so stop the reminder messages going out.
+            for reminder in (
+                db.query(CreditReminder)
+                .filter(
+                    CreditReminder.credit_tx_id == tx.id,
+                    CreditReminder.status == "PENDING",
+                )
+                .all()
+            ):
+                reminder.status = "SKIPPED"
+        elif tx.paid_amount and tx.paid_amount > 0:
+            tx.status = "PARTIAL"
+
+        tx.notes = ((tx.notes + " | ") if tx.notes else "") + f"Reduced Rs.{take} by return"
+
+    if cancelled > 0:
+        # total_credit shrinks too: this credit was never really extended.
+        account.total_credit = max(Decimal("0"), (account.total_credit or Decimal("0")) - cancelled)
+        account.outstanding  = max(Decimal("0"), (account.outstanding or Decimal("0")) - cancelled)
+        account.last_activity = datetime.utcnow()
+
+    db.flush()
+    return cancelled
+
+
 def get_due_reminders(db: Session) -> list[CreditReminder]:
     """
     Return all CreditReminders where remind_date <= today and status=PENDING.

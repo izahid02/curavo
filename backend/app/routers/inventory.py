@@ -17,15 +17,22 @@ from app.database import get_db
 from datetime import date
 from decimal import Decimal
 
-from app.models.inventory import Batch, Category, Department, Product, StockMovement, Supplier
+from app.models.inventory import (
+    Batch, Category, Department, Product, StockMovement, StockPurchase, Supplier,
+)
 from app.models.user import User
 from app.schemas.inventory import (
     AddStockRequest,
     AddStockResponse,
     BatchOut,
     BatchReceive,
+    BatchUpdateRequest,
+    BatchUpdateResponse,
     CategoryOut,
     DepartmentOut,
+    ProductBatchDetail,
+    ProductBatchesOut,
+    ProductBatchesProduct,
     ProductCreate,
     ProductListResponse,
     ProductOut,
@@ -38,10 +45,12 @@ from app.schemas.inventory import (
     SupplierReturnListResponse,
 )
 from app.services import supplier_return_service
+from app.utils.dates import get_today_ist
 from app.services.auth_service import get_current_user
 from app.services.inventory_service import (
     add_stock,
     batch_number_exists,
+    compute_purchase_totals,
     get_expiry_alerts,
     get_expiry_status,
     get_low_stock_products,
@@ -49,6 +58,7 @@ from app.services.inventory_service import (
     get_purchase_history,
     parse_expiry_month,
     receive_stock,
+    update_batch,
 )
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -56,6 +66,11 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 # Roles allowed to create/modify/delete inventory records.
 # Billing Staff and OPD Staff can READ but not write.
 _WRITE_ROLES = {"Owner", "Administrator", "Pharmacist", "Inventory Manager"}
+
+# Editing an EXISTING batch is stricter than receiving a new one: it moves a
+# stock figure that has already been counted and rewrites the cost every future
+# profit calculation for that batch reads from.  Only Owner/Administrator.
+_BATCH_EDIT_ROLES = {"Owner", "Administrator"}
 
 
 def _require_write_role(current_user: User = Depends(get_current_user)) -> User:
@@ -272,6 +287,121 @@ def update_product(
     return _build_product_out(db, product)
 
 
+@router.get("/products/{product_id}/batches", response_model=ProductBatchesOut)
+def list_product_batches_detailed(
+    product_id: int,
+    db:         Session = Depends(get_db),
+    _:          User    = Depends(get_current_user),
+):
+    """
+    Everything the slide-in Medicine Batch panel needs, in ONE request:
+    the medicine's identity fields plus every in-stock batch with the price
+    we PAID for it joined in.
+
+    Why this exists next to GET /inventory/batches/{product_id}:
+      that older endpoint returns the plain batch row.  The panel also has to
+      show a margin per batch, and the margin needs the purchase cost, which
+      lives on stock_purchases (written by Add Stock), not on the batch.
+
+    Two batches of the same medicine bought months apart routinely have
+    different costs, so the margin is a PER-BATCH number, never a per-product
+    one.  Sorted earliest-expiry first — the same FEFO order billing sells in,
+    so the batch at the top of the panel is the one going out next.
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    batches = (
+        db.query(Batch)
+        .filter(Batch.product_id == product_id, Batch.quantity_available > 0)
+        .order_by(Batch.expiry_date)
+        .all()
+    )
+
+    # Pull the purchase records for these batches in ONE query and index them by
+    # batch_id, instead of a per-batch lookup inside the loop (N+1 queries).
+    purchases: dict[int, StockPurchase] = {}
+    if batches:
+        rows = (
+            db.query(StockPurchase)
+            .filter(StockPurchase.batch_id.in_([b.id for b in batches]))
+            .order_by(StockPurchase.id)
+            .all()
+        )
+        # Later rows overwrite earlier ones, so a batch that somehow has two
+        # purchase records reports the most recent cost.
+        for row in rows:
+            purchases[row.batch_id] = row
+
+    today    = get_today_ist()
+    per      = product.units_per_strip if product.is_strip else None
+    details  = []
+
+    for b in batches:
+        purchase = purchases.get(b.id)
+
+        # Cost of one unit, ex-GST.  Prefer the Add Stock record (it is the one
+        # that separates cost from the GST charged on top); fall back to the
+        # batch's own purchase_price for stock that came in through the older
+        # GRN flow.  A zero on both means "never recorded" → None → the panel
+        # shows "—" instead of a fake 100% margin.
+        unit_cost = None
+        if purchase is not None and purchase.cost_price:
+            unit_cost = purchase.cost_price
+        elif b.purchase_price:
+            unit_cost = b.purchase_price
+
+        # strip_mrp is derived from THIS batch's per-unit price, not simply
+        # copied from the product — the product field holds only the LATEST
+        # price, so an older batch would show a strip price it never had.
+        #
+        # But the derivation has a rounding tail: a ₹100 strip of 15 tablets is
+        # stored as ₹6.67/unit, and 6.67 × 15 comes back as ₹100.05.  Five paise
+        # is noise, except it makes the panel disagree with the price printed on
+        # the box, which is the first thing a pharmacist checks.  So when the
+        # product's strip price is within that rounding distance (half a paisa
+        # per unit) we show the exact figure instead.  A batch whose price
+        # genuinely differs falls outside the window and keeps its own number.
+        strip_mrp = None
+        if per:
+            strip_mrp = b.selling_price * per
+            if product.strip_mrp:
+                tolerance = Decimal("0.005") * per
+                if abs(product.strip_mrp - strip_mrp) <= tolerance:
+                    strip_mrp = product.strip_mrp
+
+        details.append(ProductBatchDetail(
+            batch_id=b.id,
+            batch_number=b.batch_number,
+            quantity_available=b.quantity_available,
+            quantity_received=b.quantity_received,
+            expiry_date=b.expiry_date,
+            days_to_expiry=(b.expiry_date - today).days,
+            expiry_status=get_expiry_status(b.expiry_date),
+            mrp=b.mrp,
+            selling_price=b.selling_price,
+            unit_mrp=b.selling_price,
+            strip_mrp=strip_mrp,
+            scheme_label=b.scheme_label,
+            bonus_quantity=b.bonus_quantity or 0,
+            paid_quantity=b.paid_quantity,
+            purchase_price=unit_cost,
+            gst_on_purchase=purchase.gst_on_purchase if purchase else None,
+            total_cost=purchase.total_cost if purchase else None,
+            discount_percent=purchase.discount_percent if purchase else None,
+            # Expired stock is still ON the shelf (it has to be physically
+            # returned to the supplier) but can never be sold, so it is listed
+            # and flagged rather than hidden.
+            is_active=b.expiry_date >= today,
+        ))
+
+    return ProductBatchesOut(
+        product=ProductBatchesProduct.model_validate(product),
+        batches=details,
+    )
+
+
 @router.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_product(
     product_id: int,
@@ -377,13 +507,17 @@ def add_stock_to_product(
     # If the pharmacist chose to spend some of this supplier's advance, make
     # sure they actually have that much BEFORE writing anything.  The service
     # clamps too, but a clear up-front error is friendlier than a silent clamp.
-    quantity_dec  = Decimal(str(body.quantity))
-    cost_dec      = body.cost_price if body.cost_price is not None else Decimal("0")
-    invoice_total = (
-        Decimal(str(body.supplier_invoice_total))
-        if body.supplier_invoice_total is not None
-        else quantity_dec * cost_dec
-    )
+    # The invoice we validate against is the REAL one: trade discount off the
+    # rate first, then GST on what is left.  Leaving either out makes a "use my
+    # whole advance" request look over-large (no GST) or over-small (no
+    # discount).  Same helper the service uses, so both agree to the paisa.
+    invoice_total = compute_purchase_totals(
+        paid_quantity=body.quantity,
+        cost_price=body.cost_price,
+        gst_rate=product.gst_rate,
+        discount_percent=body.discount_percent,
+        supplier_invoice_total=body.supplier_invoice_total,
+    )["invoice_total"]
 
     advance_requested = Decimal(str(body.advance_used or 0))
     advance_applied   = Decimal("0")
@@ -431,7 +565,7 @@ def add_stock_to_product(
             product.unit_mrp = body.unit_mrp
 
     # --- All good — perform the writes and commit ---------------------------
-    batch, _purchase, credit = add_stock(db, body, current_user.id)
+    batch, purchase, credit = add_stock(db, body, current_user.id)
     db.commit()
     db.refresh(batch)
 
@@ -472,6 +606,14 @@ def add_stock_to_product(
         bonus_quantity=bonus_qty,
         total_quantity=total_qty,
         effective_cost_per_unit=batch.effective_cost_per_unit,
+        # GST breakdown as actually stored on the purchase row (Fix 7).
+        base_cost=(purchase.total_cost or Decimal("0")) - (purchase.gst_on_purchase or Decimal("0")),
+        gst_on_purchase=purchase.gst_on_purchase or Decimal("0"),
+        total_cost=purchase.total_cost or Decimal("0"),
+        # Supplier discount, per unit, straight from what was stored.
+        discount_percent=purchase.discount_percent or Decimal("0"),
+        discount_amount=purchase.discount_amount or Decimal("0"),
+        effective_cost=purchase.effective_cost,
     )
 
 
@@ -500,6 +642,176 @@ def purchase_history(
         date_to=date_to,
     )
     return PurchaseHistoryResponse(**result)
+
+
+@router.get("/purchase-history/by-supplier")
+def purchase_history_by_supplier(
+    db: Session = Depends(get_db),
+    _:  User    = Depends(get_current_user),
+):
+    """
+    Purchase History grouped by DISTRIBUTOR, one row per supplier.
+
+    WHY GROUPED:
+    The flat list interleaves every supplier, so answering the question a
+    pharmacist actually asks — "what have I bought from Shakti, and what do I
+    owe them?" — meant scrolling and mentally filtering.  Grouping puts each
+    distributor's dealings on one line and lets the detail open underneath.
+
+    Each row carries the entry count, the last purchase date, and the total
+    billed.  `total_value` is the sum of total_cost (goods + GST — what the
+    supplier actually invoiced us).  Rows written before that column existed
+    have total_cost = 0, so they fall back to quantity × cost_price, which is
+    the same figure minus a tax we never recorded.
+
+    Suppliers with no purchases at all are omitted — an empty accordion row
+    is noise.  Sorted by most recent purchase first, because that is the
+    supplier the pharmacist is most likely looking for.
+
+    NOTE this route is declared BEFORE /batches/{product_id} and after
+    /purchase-history so no path parameter can swallow the literal segment.
+    """
+    rows = (
+        db.query(StockPurchase)
+        .join(Supplier, StockPurchase.supplier_id == Supplier.id)
+        .all()
+    )
+
+    # Fold the rows into one bucket per supplier.  Doing this in Python rather
+    # than SQL keeps the "fall back to quantity × cost_price" rule in one
+    # readable place — a pharmacy has tens of suppliers, not thousands.
+    groups: dict[int, dict] = {}
+    for p in rows:
+        g = groups.setdefault(p.supplier_id, {
+            "supplier_id":       p.supplier_id,
+            "supplier_name":     p.supplier.name if p.supplier else "—",
+            "supplier_phone":    p.supplier.phone if p.supplier else None,
+            "entry_count":       0,
+            "total_value":       Decimal("0"),
+            "last_purchase_date": None,
+            "product_ids":       set(),
+        })
+        g["entry_count"] += 1
+        g["product_ids"].add(p.product_id)
+
+        value = p.total_cost or Decimal("0")
+        if not value and p.cost_price:
+            value = Decimal(str(p.cost_price)) * Decimal(p.quantity or 0)
+        g["total_value"] += value
+
+        # supplier_invoice_date is a plain DATE (the date printed on the paper
+        # invoice), so it compares directly — no IST conversion needed.
+        if p.supplier_invoice_date and (
+            g["last_purchase_date"] is None
+            or p.supplier_invoice_date > g["last_purchase_date"]
+        ):
+            g["last_purchase_date"] = p.supplier_invoice_date
+
+    items = []
+    for g in groups.values():
+        items.append({
+            "supplier_id":        g["supplier_id"],
+            "supplier_name":      g["supplier_name"],
+            "supplier_phone":     g["supplier_phone"],
+            "entry_count":        g["entry_count"],
+            "product_count":      len(g["product_ids"]),
+            "total_value":        g["total_value"].quantize(Decimal("0.01")),
+            "last_purchase_date": g["last_purchase_date"],
+        })
+
+    # Newest dealings first; suppliers with no dated invoice sink to the bottom.
+    items.sort(key=lambda r: (r["last_purchase_date"] is not None, r["last_purchase_date"]), reverse=True)
+
+    return {
+        "suppliers":    items,
+        "total_value":  sum((r["total_value"] for r in items), Decimal("0")),
+        "entry_count":  sum(r["entry_count"] for r in items),
+    }
+
+
+@router.put("/batches/{batch_id}", response_model=BatchUpdateResponse)
+def update_batch_endpoint(
+    batch_id:     int,
+    body:         BatchUpdateRequest,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(get_current_user),
+):
+    """
+    Correct a batch that was entered wrongly (wrong batch number, quantity,
+    expiry, MRP, cost, discount or scheme).
+
+    Owner / Administrator only.  This is not a counter operation: it moves a
+    stock figure and rewrites a purchase cost, which changes both the shelf
+    count and every future profit calculation for that batch.
+
+    A quantity change is recorded as ONE StockMovement(type='ADJUST') carrying
+    the signed difference — never as a new delivery.
+    """
+    if current_user.role.name not in _BATCH_EDIT_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an Owner or Administrator can edit a batch.",
+        )
+
+    batch = db.query(Batch).filter(Batch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    # --- Validate BEFORE writing anything -----------------------------------
+    if body.batch_number is not None:
+        new_number = body.batch_number.strip()
+        if not new_number:
+            raise HTTPException(status_code=400, detail="Batch number cannot be blank.")
+        # Unique per product — but this batch keeping its own number is fine.
+        clash = (
+            db.query(Batch.id)
+            .filter(
+                Batch.product_id == batch.product_id,
+                Batch.batch_number == new_number,
+                Batch.id != batch.id,
+            )
+            .first()
+        )
+        if clash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Batch number '{new_number}' already exists for this medicine.",
+            )
+
+    if body.expiry_date is not None:
+        expiry = parse_expiry_month(body.expiry_date)
+        # Same typo guard as Add Stock: "0229-03" would otherwise sail through
+        # and render as "656470 days ago" on the expiry alerts page.
+        if expiry.year < 2020 or expiry.year > 2050:
+            raise HTTPException(status_code=400, detail="Invalid expiry date")
+        # An expiry in the PAST is allowed here, unlike Add Stock — correcting a
+        # batch to the date actually printed on the box is exactly the reason a
+        # pharmacist opens this form, and expired stock still has to be recorded
+        # so it can be returned to the supplier.
+
+    result = update_batch(db, batch, body, current_user.id)
+    db.commit()
+    db.refresh(batch)
+
+    # --- Confirmation message ----------------------------------------------
+    parts = [f"Batch {batch.batch_number} updated"]
+    if result["quantity_delta"]:
+        sign = "+" if result["quantity_delta"] > 0 else ""
+        parts.append(f"stock adjusted {sign}{result['quantity_delta']} units")
+    if result["purchase_changed"]:
+        # Say it plainly: the ledger with the distributor is NOT rewritten here.
+        parts.append("supplier credit unchanged — settle any invoice difference from Supplier Credit")
+
+    return BatchUpdateResponse(
+        success=True,
+        batch_id=batch.id,
+        message=" — ".join(parts),
+        quantity_delta=result["quantity_delta"],
+        new_total_stock=get_product_stock(db, batch.product_id),
+        effective_cost=result["effective_cost"],
+        gst_on_purchase=result["gst_on_purchase"],
+        total_cost=result["total_cost"],
+    )
 
 
 @router.get("/batches/{product_id}", response_model=list[BatchOut])

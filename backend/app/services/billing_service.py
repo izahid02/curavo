@@ -15,7 +15,7 @@ IMPORTANT RULES (from CLAUDE.md):
     database transaction.  The caller (router) calls db.commit() at the end;
     any exception before that rolls everything back automatically.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException
@@ -51,16 +51,32 @@ def get_next_invoice_number(db: Session) -> str:
 # FEFO allocation
 # ---------------------------------------------------------------------------
 
-def fefo_allocate(db: Session, product_id: int, quantity: int) -> list[dict]:
+def fefo_allocate(
+    db:                 Session,
+    product_id:         int,
+    quantity:           int,
+    preferred_batch_id: int | None = None,
+) -> list[dict]:
     """
     Decide which batches to take stock from to fulfil `quantity` units of
     `product_id`, using FEFO (First Expiry First Out) order.
 
     Rules:
-      - Only batches where expiry_date >= today AND quantity_available > 0
+      - Only batches with quantity_available > 0 that expire MORE than
+        BILLING_MIN_EXPIRY_DAYS (30) days from now.  That single test rules out
+        already-expired stock too, and it is deliberately the same rule the
+        medicine search uses — what the pharmacist can see, they can bill, and
+        nothing else.  Stock inside the 30-day window goes back to the supplier.
       - Sort by expiry_date ASC — earliest-expiring batch first
       - Fill the first batch; if it runs out, continue to the next
       - If total available stock is less than requested: raise HTTP 400
+
+    preferred_batch_id: the batch the pharmacist actually picked in the search
+    dropdown.  It is moved to the FRONT of the queue so their choice is what
+    gets deducted; the rest of the list stays in FEFO order and only absorbs a
+    shortfall.  An unknown or no-longer-sellable id is ignored (the batch may
+    have emptied since the dropdown was rendered), leaving plain FEFO as a safe
+    fallback rather than failing the sale.
 
     Returns a list like:
       [{"batch": <Batch>, "qty": 3}, {"batch": <Batch>, "qty": 2}]
@@ -69,13 +85,19 @@ def fefo_allocate(db: Session, product_id: int, quantity: int) -> list[dict]:
     SQLite's single-writer model prevents concurrent stock conflicts, so no
     row-level locking is needed here.
     """
-    today = date.today()
+    # Import here rather than at module top: inventory_service imports from the
+    # billing side in places, and a top-level import would make that circular.
+    from app.services.inventory_service import BILLING_MIN_EXPIRY_DAYS
+    from app.utils.dates import get_today_ist
+
+    # A batch needs more than 30 days of shelf life left to be sellable.
+    cutoff = get_today_ist() + timedelta(days=BILLING_MIN_EXPIRY_DAYS)
 
     batches = (
         db.query(Batch)
         .filter(
             Batch.product_id == product_id,
-            Batch.expiry_date >= today,    # skip expired batches — cannot sell them
+            Batch.expiry_date > cutoff,    # skips expired AND near-expiry stock
             Batch.quantity_available > 0,  # skip empty batches
         )
         .order_by(Batch.expiry_date)       # FEFO: earliest expiry first
@@ -84,6 +106,12 @@ def fefo_allocate(db: Session, product_id: int, quantity: int) -> list[dict]:
         .all()
     )
 
+    # Honour the pharmacist's explicit batch choice by pulling it to the front.
+    # sorted() is stable, so False (= the chosen batch) sorts before True and
+    # every other batch keeps its FEFO position behind it.
+    if preferred_batch_id is not None:
+        batches.sort(key=lambda b: b.id != preferred_batch_id)
+
     # Check whether enough stock exists across all valid batches
     total_available = sum(b.quantity_available for b in batches)
     if total_available < quantity:
@@ -91,7 +119,11 @@ def fefo_allocate(db: Session, product_id: int, quantity: int) -> list[dict]:
         name = product.name if product else f"Product #{product_id}"
         raise HTTPException(
             status_code=400,
-            detail=f"Insufficient stock for {name}. Available: {total_available}",
+            detail=(
+                f"Insufficient sellable stock for {name}. Available: {total_available}. "
+                f"(Batches expiring within {BILLING_MIN_EXPIRY_DAYS} days cannot be sold — "
+                f"return them to the supplier.)"
+            ),
         )
 
     # Fill from the earliest-expiring batch, then overflow to the next
@@ -138,8 +170,15 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
     total_gst = Decimal("0")
 
     for bill_item in data.items:
-        # Get batch allocations in FEFO order.  This also validates stock.
-        allocations = fefo_allocate(db, bill_item.product_id, bill_item.quantity)
+        # Get batch allocations.  The batch the pharmacist picked in the search
+        # dropdown (if any) is deducted first; anything left over falls back to
+        # FEFO order.  This also validates that enough sellable stock exists.
+        allocations = fefo_allocate(
+            db,
+            bill_item.product_id,
+            bill_item.quantity,
+            preferred_batch_id=bill_item.batch_id,
+        )
 
         for alloc in allocations:
             batch: Batch = alloc["batch"]
@@ -298,15 +337,38 @@ def process_return(
     invoice_number: str,
     reason: str | None,
     user_id: int,
+    return_items: list | None = None,
 ) -> Invoice:
     """
-    Reverse a completed invoice:
-      - Restore stock to each original batch
-      - Write RETURN stock movement rows
-      - Mark invoice.status = 'RETURNED'
-      - Write an AuditLog entry
+    Return some — or all — of an invoice.
 
-    All changes are in one transaction; caller does db.commit().
+    WHY THIS IS PER LINE AND NOT PER INVOICE:
+    A customer walks back in with one medicine off a five-line bill.  The old
+    behaviour reversed the WHOLE invoice, which put four medicines the customer
+    still has back on the shelf as sellable stock.  So the caller now names the
+    lines and the quantities coming back.
+
+    return_items: a list of objects with .invoice_item_id and .return_qty.
+      Passing None (or an empty list) returns everything still outstanding on
+      the invoice — that is what the old whole-invoice button did, and older
+      clients that send only a reason keep working unchanged.
+
+    For each returned line:
+      - stock goes back onto that line's ORIGINAL batch (never FEFO — the
+        physical box the customer is handing over came from that batch)
+      - a StockMovement(type='RETURN') records it
+      - invoice_item.returned_qty grows; is_returned flips once the whole line
+        is back
+
+    Invoice status afterwards:
+      every line fully returned → 'RETURNED'
+      some units returned       → 'PARTIAL_RETURN'
+
+    The refund is the returned units' share of what the customer actually paid
+    (see _refund_for below).  If the invoice was sold on credit, that refund
+    reduces the outstanding credit rather than being handed over as cash.
+
+    All changes are in one transaction; the caller does db.commit().
     """
     invoice = (
         db.query(Invoice)
@@ -316,31 +378,151 @@ def process_return(
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.status == "RETURNED":
-        raise HTTPException(status_code=400, detail="Invoice has already been returned")
+        raise HTTPException(status_code=400, detail="Invoice has already been fully returned")
 
-    # Return stock to each batch and record the movement
-    for item in invoice.items:
-        item.batch.quantity_available += item.quantity
+    items_by_id = {item.id: item for item in invoice.items}
+
+    # --- Work out what is actually coming back ------------------------------
+    # requested maps invoice_item_id → units to return.
+    requested: dict[int, int] = {}
+    if return_items:
+        for req in return_items:
+            item = items_by_id.get(req.invoice_item_id)
+            if item is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item #{req.invoice_item_id} is not part of invoice {invoice_number}.",
+                )
+            qty = int(req.return_qty)
+            if qty <= 0:
+                # A zero row means "not selected" — silently skip rather than
+                # failing the whole return over an unticked checkbox.
+                continue
+            remaining = item.quantity - (item.returned_qty or 0)
+            if qty > remaining:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Cannot return {qty} of {item.product.name} — only "
+                        f"{remaining} of that line remain(s) unreturned."
+                    ),
+                )
+            # Two rows naming the same line add up rather than overwrite.
+            requested[item.id] = requested.get(item.id, 0) + qty
+            if requested[item.id] > remaining:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Cannot return more than {remaining} unit(s) of "
+                        f"{item.product.name}."
+                    ),
+                )
+    else:
+        # No list given → return everything still outstanding (the old behaviour).
+        for item in invoice.items:
+            remaining = item.quantity - (item.returned_qty or 0)
+            if remaining > 0:
+                requested[item.id] = remaining
+
+    if not requested:
+        raise HTTPException(
+            status_code=400,
+            detail="Select at least one item (with a quantity) to return.",
+        )
+
+    # --- Restore stock, one line at a time ----------------------------------
+    refund = Decimal("0")
+    returned_names: list[str] = []
+
+    for item_id, qty in requested.items():
+        item = items_by_id[item_id]
+
+        # Back onto the batch it was sold from, so expiry dates stay honest.
+        item.batch.quantity_available += qty
 
         db.add(StockMovement(
             batch_id=item.batch_id,
             movement_type="RETURN",
-            quantity=item.quantity,   # positive = stock coming BACK IN
+            quantity=qty,              # positive = stock coming BACK IN
             reference=invoice_number,
             user_id=user_id,
         ))
 
-    invoice.status = "RETURNED"
+        item.returned_qty = (item.returned_qty or 0) + qty
+        item.is_returned = item.returned_qty >= item.quantity
 
-    # Permanent record in the audit log: who returned it and why
+        refund += _refund_for(invoice, item, qty)
+        returned_names.append(f"{item.product.name} × {qty}")
+
+    refund = refund.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # Accumulate (never overwrite) — a line can come back across several visits,
+    # and every dashboard and report subtracts this from total_amount to get
+    # what the customer is left having paid.  See services/revenue.py.
+    invoice.refunded_amount = (invoice.refunded_amount or Decimal("0")) + refund
+
+    # --- Invoice status ------------------------------------------------------
+    # "Fully returned" means every line is back, not just the ones in this
+    # request — a second partial return can be what finally completes it.
+    fully_returned = all(
+        (it.returned_qty or 0) >= it.quantity for it in invoice.items
+    )
+    invoice.status = "RETURNED" if fully_returned else "PARTIAL_RETURN"
+
+    # --- Credit invoices: refund reduces the debt, not the till -------------
+    # Nothing was handed over for the unpaid part, so "refunding" it means the
+    # patient simply owes less.
+    if invoice.credit_amount and invoice.credit_amount > 0 and invoice.patient_id:
+        from app.services.credit_service import reduce_invoice_credit
+        applied = reduce_invoice_credit(db, invoice.id, refund, user_id)
+        invoice.credit_amount = (invoice.credit_amount - applied)
+
+    # Permanent record in the audit log: who returned what, and why
     db.add(AuditLog(
         user_id=user_id,
-        action="INVOICE_RETURN",
+        action="INVOICE_RETURN" if fully_returned else "INVOICE_PARTIAL_RETURN",
         entity="invoices",
         details=(
-            f"Invoice {invoice_number} returned. "
+            f"Invoice {invoice_number} {'fully' if fully_returned else 'partially'} "
+            f"returned: {', '.join(returned_names)}. Refund Rs.{refund}. "
             f"Reason: {reason or 'not specified'}"
         ),
     ))
 
     return invoice   # caller does db.commit() + db.refresh(invoice)
+
+
+def _refund_for(invoice: Invoice, item: InvoiceItem, qty: int) -> Decimal:
+    """
+    What `qty` units of `item` are worth back to the customer.
+
+    Start from the line's own money — line_total is GST-inclusive, so the tax
+    comes back with it automatically — and take the returned units' share:
+
+        gross = line_total × qty / line_quantity
+
+    Then subtract this line's share of any BILL-LEVEL discount.  A ₹50 discount
+    on a ₹1,000 bill means the customer paid 95% of every line, so returning a
+    ₹200 line refunds ₹190, not ₹200.  Sharing it by gross value is what makes
+    a full return refund exactly (subtotal + GST − discount).
+
+    The home visit charge is deliberately NOT refunded: the pharmacist already
+    travelled and administered the drip.  Returning the medicine does not undo
+    that service.
+
+    Pure arithmetic — no database access.
+    """
+    if item.quantity <= 0:
+        return Decimal("0")
+
+    gross = (item.line_total * Decimal(qty) / Decimal(item.quantity))
+
+    discount = invoice.discount_amount or Decimal("0")
+    if discount > 0:
+        # Denominator is the bill's own goods value (every line's line_total),
+        # which is the base the discount was taken off.
+        items_gross = sum((it.line_total for it in invoice.items), Decimal("0"))
+        if items_gross > 0:
+            gross -= discount * gross / items_gross
+
+    return gross.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

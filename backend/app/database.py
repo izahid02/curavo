@@ -187,6 +187,10 @@ def init_db():
     import app.models.prescription      # noqa: F401
     import app.models.credit             # noqa: F401
     import app.models.expenditure        # noqa: F401
+    import app.models.supplier_credit    # noqa: F401
+    # Shop-wide identity (Fix 7).  It is a brand-new TABLE, not a column, so it
+    # is created here by create_all() rather than by an ALTER in main.py.
+    import app.models.settings           # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

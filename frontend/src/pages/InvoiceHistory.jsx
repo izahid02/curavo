@@ -3,15 +3,15 @@
  *
  * Shows a paginated, filterable table of all invoices.
  * Clicking a row opens a detail modal with full line items.
- * The modal has a "Return Invoice" button to reverse a sale.
+ * The modal has a per-item return checklist (partial returns).
  *
- * Filters: date preset (Today / This Week / This Month / All)
+ * Filters: period tab (Today / Yesterday / This Week / This Month / All)
  *          + text search by invoice number or patient name
- *          + status filter (All / Completed / Returned)
+ *          + status filter (All / Completed / Partial Return / Returned)
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { formatDateTimeShort, getTodayIST } from '../lib/datetime';
+import { formatDateTimeShort } from '../lib/datetime';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,36 +24,29 @@ function inr(amount) {
 // Show invoice timestamps in IST (see lib/datetime.js for why).
 const fmtDate = formatDateTimeShort;
 
-/** Return ISO date strings for preset filters, anchored to TODAY in IST. */
-function presetDates(preset) {
-  // getTodayIST() is "YYYY-MM-DD" for today in IST — the day the pharmacy is
-  // actually having. Building the anchor date from it (at UTC noon, so no
-  // timezone can roll it to a neighbouring day) keeps every preset on the
-  // right calendar day regardless of the PC's clock zone.
-  const todayStr = getTodayIST();
-  const today = new Date(todayStr + 'T12:00:00Z');
-  const pad = n => String(n).padStart(2, '0');
-  const fmt = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
-
-  if (preset === 'today') {
-    return { date_from: todayStr, date_to: todayStr };
-  }
-  if (preset === 'week') {
-    const mon = new Date(today);
-    mon.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));  // Monday
-    return { date_from: fmt(mon), date_to: todayStr };
-  }
-  if (preset === 'month') {
-    const first = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    return { date_from: fmt(first), date_to: todayStr };
-  }
-  return {};   // 'all' — no date filter
-}
+/**
+ * The date-window tabs.
+ *
+ * ⚠ THE BROWSER NO LONGER WORKS OUT THE DATES.  It used to build a
+ * date_from/date_to pair here in JavaScript, which put the definition of "this
+ * week" on the PC's own clock and timezone — so on a machine set to anything
+ * but IST the window could miss invoices the pharmacist had just created, and
+ * "This Week" came back empty.  Now we send the NAME of the period and the
+ * server, which is the only thing that knows the timestamps are stored in UTC,
+ * turns it into the right window.  (See backend/app/utils/dates.py.)
+ */
+const PERIODS = [
+  { key: 'today',     label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'week',      label: 'This Week' },
+  { key: 'month',     label: 'This Month' },
+  { key: 'all',       label: 'All' },
+];
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function InvoiceHistory() {
-  const [datePreset,  setDatePreset]  = useState('today');
+  const [period,      setPeriod]      = useState('today');
   const [search,      setSearch]      = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page,        setPage]        = useState(1);
@@ -73,6 +66,9 @@ export default function InvoiceHistory() {
   const [returnReason, setReturnReason] = useState('');
   const [returnError, setReturnError] = useState(null);
   const [showReturnForm, setShowReturnForm] = useState(false);
+  // Per-line return selection, keyed by invoice_item id:
+  //   { [itemId]: { checked: bool, qty: number } }
+  const [returnLines, setReturnLines] = useState({});
 
   const LIMIT = 20;
 
@@ -81,11 +77,9 @@ export default function InvoiceHistory() {
     setLoading(true);
     setLoadError(null);
     try {
-      const params = {
-        page,
-        limit: LIMIT,
-        ...presetDates(datePreset),
-      };
+      // Send the period NAME, not a computed date range — the server owns the
+      // definition of "this week" because it owns the timezone (see PERIODS).
+      const params = { page, limit: LIMIT, period };
       if (search.trim()) params.search = search.trim();
       if (statusFilter)  params.status = statusFilter;
 
@@ -97,12 +91,28 @@ export default function InvoiceHistory() {
     } finally {
       setLoading(false);
     }
-  }, [page, datePreset, search, statusFilter]);
+  }, [page, period, search, statusFilter]);
 
   useEffect(() => { fetchList(); }, [fetchList]);
 
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [datePreset, search, statusFilter]);
+  useEffect(() => { setPage(1); }, [period, search, statusFilter]);
+
+  /**
+   * Start every returnable line unchecked with its full remaining quantity
+   * pre-filled.  Unchecked-by-default is deliberate: a return is usually ONE
+   * item off the bill, and a checklist that arrives all-ticked invites someone
+   * to hit Confirm and put four medicines the customer still has back on the
+   * shelf as sellable stock.
+   */
+  function buildReturnLines(invoice) {
+    const lines = {};
+    (invoice.items || []).forEach((item) => {
+      const remaining = item.quantity - (item.returned_qty || 0);
+      if (remaining > 0) lines[item.id] = { checked: false, qty: remaining };
+    });
+    return lines;
+  }
 
   // ── Open detail modal ───────────────────────────────────────────────────────
   async function openDetail(invoiceNumber) {
@@ -112,9 +122,11 @@ export default function InvoiceHistory() {
     setShowReturnForm(false);
     setReturnReason('');
     setReturnError(null);
+    setReturnLines({});
     try {
       const res = await api.get(`/billing/invoices/${invoiceNumber}`);
       setDetail(res.data);
+      setReturnLines(buildReturnLines(res.data));
     } catch (err) {
       setDetail({ error: err.response?.data?.detail || 'Failed to load invoice' });
     } finally {
@@ -126,20 +138,78 @@ export default function InvoiceHistory() {
     setSelectedNum(null);
     setDetail(null);
     setShowReturnForm(false);
+    setReturnLines({});
   }
+
+  /** Tick / untick one line. */
+  function toggleLine(itemId) {
+    setReturnLines((prev) => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], checked: !prev[itemId]?.checked },
+    }));
+  }
+
+  /** Change the quantity on one line, clamped to 1..remaining. */
+  function setLineQty(itemId, raw, max) {
+    const n = Math.max(1, Math.min(Number(max), Number(raw) || 1));
+    setReturnLines((prev) => ({
+      ...prev,
+      // Typing a quantity implies you want the line — tick it automatically so
+      // a filled-in box can never be silently ignored on submit.
+      [itemId]: { checked: true, qty: n },
+    }));
+  }
+
+  /**
+   * The refund preview, computed the SAME way the backend computes the real
+   * refund (billing_service._refund_for): each line's share of its own
+   * line_total, less its share of any bill-level discount.
+   *
+   * ⚠ If you change one, change the other — a preview that disagrees with the
+   * money actually refunded is worse than no preview.
+   * The home visit charge is not refundable (the pharmacist already travelled),
+   * so it is not in here either.
+   */
+  const refundPreview = useMemo(() => {
+    if (!detail?.items) return 0;
+    const itemsGross = detail.items.reduce((s, it) => s + Number(it.line_total || 0), 0);
+    const discount   = Number(detail.discount_amount || 0);
+
+    return detail.items.reduce((sum, item) => {
+      const line = returnLines[item.id];
+      if (!line?.checked || !item.quantity) return sum;
+      let gross = Number(item.line_total) * line.qty / item.quantity;
+      if (discount > 0 && itemsGross > 0) gross -= discount * gross / itemsGross;
+      return sum + gross;
+    }, 0);
+  }, [detail, returnLines]);
+
+  const selectedCount = Object.values(returnLines).filter((l) => l.checked).length;
 
   // ── Process return ──────────────────────────────────────────────────────────
   async function processReturn() {
     if (!detail || returning) return;
+
+    const items = Object.entries(returnLines)
+      .filter(([, line]) => line.checked && line.qty > 0)
+      .map(([id, line]) => ({ invoice_item_id: Number(id), return_qty: line.qty }));
+
+    if (items.length === 0) {
+      setReturnError('Tick at least one item to return.');
+      return;
+    }
+
     setReturning(true);
     setReturnError(null);
     try {
       const res = await api.post(`/billing/invoices/${detail.invoice_number}/return`, {
+        items,
         reason: returnReason || null,
       });
-      setDetail(res.data);     // update modal with returned status
+      setDetail(res.data);                       // updated status + returned_qty
+      setReturnLines(buildReturnLines(res.data)); // remaining quantities shrink
       setShowReturnForm(false);
-      fetchList();             // refresh list to show new status
+      fetchList();                                // refresh list to show new status
     } catch (err) {
       setReturnError(err.response?.data?.detail || 'Return failed');
     } finally {
@@ -160,23 +230,19 @@ export default function InvoiceHistory() {
       <div className="card" style={{ padding: '14px 18px', marginBottom: 18 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
 
-          {/* Date presets */}
-          <div style={{ display: 'flex', gap: 4 }}>
-            {[
-              { key: 'today', label: 'Today' },
-              { key: 'week',  label: 'This Week' },
-              { key: 'month', label: 'This Month' },
-              { key: 'all',   label: 'All' },
-            ].map(p => (
+          {/* Period tabs */}
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {PERIODS.map(p => (
               <button
                 key={p.key}
-                onClick={() => setDatePreset(p.key)}
+                onClick={() => setPeriod(p.key)}
                 style={{
                   padding: '6px 14px', fontSize: 13, fontWeight: 600,
-                  background: datePreset === p.key ? 'var(--brand)' : 'var(--bg)',
-                  color:      datePreset === p.key ? '#fff' : 'var(--text)',
-                  border: `1px solid ${datePreset === p.key ? 'var(--brand)' : 'var(--border)'}`,
+                  background: period === p.key ? 'var(--brand)' : 'var(--bg)',
+                  color:      period === p.key ? '#fff' : 'var(--text)',
+                  border: `1px solid ${period === p.key ? 'var(--brand)' : 'var(--border)'}`,
                   borderRadius: 'var(--radius)',
+                  cursor: 'pointer',
                 }}>
                 {p.label}
               </button>
@@ -190,6 +256,7 @@ export default function InvoiceHistory() {
             style={{ width: 'auto', padding: '6px 10px', fontSize: 13 }}>
             <option value="">All Statuses</option>
             <option value="COMPLETED">Completed</option>
+            <option value="PARTIAL_RETURN">Partial Return</option>
             <option value="RETURNED">Returned</option>
           </select>
 
@@ -351,6 +418,11 @@ export default function InvoiceHistory() {
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             HSN rate: {item.gst_rate}%
                           </div>
+                          {item.returned_qty > 0 && (
+                            <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 600 }}>
+                              {item.returned_qty} returned
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '6px 6px', textAlign: 'right' }}>{item.quantity}</td>
                         <td style={{ padding: '6px 6px', textAlign: 'right' }}>{inr(item.taxable_amount)}</td>
@@ -390,8 +462,10 @@ export default function InvoiceHistory() {
                   </div>
                 </div>
 
-                {/* Return section */}
-                {detail.status === 'COMPLETED' && (
+                {/* ── Return section ──────────────────────────────────────
+                    Shown while ANY line still has unreturned units, so a
+                    partly-returned invoice can be returned again later. */}
+                {detail.status !== 'RETURNED' && Object.keys(returnLines).length > 0 && (
                   <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
                     {!showReturnForm ? (
                       <button
@@ -401,17 +475,99 @@ export default function InvoiceHistory() {
                           color: 'var(--danger)', borderRadius: 'var(--radius)',
                           padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
                         }}>
-                        Return Invoice
+                        Return Items
                       </button>
                     ) : (
                       <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--danger)' }}>
-                          Confirm Return
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, color: 'var(--danger)' }}>
+                          Return Items — {detail.invoice_number}
                         </div>
-                        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
-                          This will restore all stock and mark the invoice as RETURNED.
-                          This cannot be undone.
+                        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 12 }}>
+                          Tick only what the customer is handing back. Stock goes
+                          back to the same batch it was sold from. This cannot be undone.
                         </p>
+
+                        {/* ── The checklist ─────────────────────────────── */}
+                        <div style={{
+                          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                          overflow: 'hidden', marginBottom: 12,
+                        }}>
+                          {detail.items.map((item) => {
+                            const remaining = item.quantity - (item.returned_qty || 0);
+                            const line = returnLines[item.id];
+
+                            // A fully returned line still shows, greyed out, so
+                            // the pharmacist can see it was already handled
+                            // rather than wondering where it went.
+                            if (remaining <= 0) {
+                              return (
+                                <div key={item.id} style={{
+                                  padding: '10px 12px', fontSize: 13,
+                                  borderBottom: '1px solid var(--border)',
+                                  color: 'var(--text-muted)', background: 'var(--bg)',
+                                }}>
+                                  <span style={{ textDecoration: 'line-through' }}>{item.product_name}</span>
+                                  {' '}— already returned in full ({item.quantity})
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div key={item.id} style={{
+                                padding: '10px 12px',
+                                borderBottom: '1px solid var(--border)',
+                                background: line?.checked ? 'rgba(225,29,72,0.05)' : 'transparent',
+                              }}>
+                                <label style={{
+                                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                                  cursor: 'pointer', fontSize: 13,
+                                }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(line?.checked)}
+                                    onChange={() => toggleLine(item.id)}
+                                    style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0, cursor: 'pointer' }}
+                                  />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                                      <strong>{item.product_name}</strong>
+                                      <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                        {inr(item.line_total)}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                                      {item.batch_number ? `Batch: ${item.batch_number} · ` : ''}
+                                      {item.quantity} sold
+                                      {item.returned_qty > 0 && ` · ${item.returned_qty} already returned`}
+                                    </div>
+                                  </div>
+                                </label>
+
+                                {line?.checked && (
+                                  <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                    marginTop: 8, marginLeft: 26, fontSize: 12.5,
+                                  }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>Return qty:</span>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={remaining}
+                                      value={line.qty}
+                                      onChange={(e) => setLineQty(item.id, e.target.value, remaining)}
+                                      style={{
+                                        width: 72, padding: '4px 8px', fontSize: 13,
+                                        border: '1px solid var(--border)', borderRadius: 6,
+                                      }}
+                                    />
+                                    <span style={{ color: 'var(--text-hint)' }}>(max: {remaining})</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
                         <textarea
                           value={returnReason}
                           onChange={e => setReturnReason(e.target.value)}
@@ -421,31 +577,54 @@ export default function InvoiceHistory() {
                             width: '100%', resize: 'vertical', fontSize: 13,
                             padding: '8px 10px', border: '1px solid var(--border)',
                             borderRadius: 'var(--radius)', fontFamily: 'var(--font-body)',
+                            boxSizing: 'border-box',
                           }}
                         />
+
+                        {/* Refund preview — the selected lines only */}
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                          marginTop: 12, fontSize: 14,
+                        }}>
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            Refund amount{selectedCount > 0 ? ` (${selectedCount} item${selectedCount === 1 ? '' : 's'})` : ''}
+                          </span>
+                          <strong style={{ fontSize: 16, color: 'var(--danger)' }}>
+                            {inr(refundPreview)}
+                          </strong>
+                        </div>
+                        {Number(detail.home_visit_charge) > 0 && (
+                          <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 2 }}>
+                            Home visit charge of {inr(detail.home_visit_charge)} is not refunded —
+                            the visit already happened.
+                          </div>
+                        )}
+
                         {returnError && (
-                          <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 6 }}>
+                          <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>
                             {returnError}
                           </div>
                         )}
-                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                           <button
                             onClick={() => setShowReturnForm(false)}
                             style={{
                               flex: 1, background: 'var(--bg)', border: '1px solid var(--border)',
                               color: 'var(--text)', borderRadius: 'var(--radius)',
-                              padding: '8px', fontSize: 13,
+                              padding: '8px', fontSize: 13, cursor: 'pointer',
                             }}>
                             Cancel
                           </button>
                           <button
                             onClick={processReturn}
-                            disabled={returning}
+                            disabled={returning || selectedCount === 0}
                             style={{
                               flex: 1, background: 'var(--danger)', color: '#fff',
                               border: 'none', borderRadius: 'var(--radius)',
                               padding: '8px', fontSize: 13, fontWeight: 600,
-                              cursor: returning ? 'not-allowed' : 'pointer',
+                              opacity: selectedCount === 0 ? 0.5 : 1,
+                              cursor: (returning || selectedCount === 0) ? 'not-allowed' : 'pointer',
                             }}>
                             {returning ? 'Processing…' : 'Confirm Return'}
                           </button>
@@ -467,17 +646,20 @@ export default function InvoiceHistory() {
 
 function StatusBadge({ status }) {
   const colors = {
-    COMPLETED: { bg: 'var(--ok-bg)',     color: 'var(--ok)' },
-    RETURNED:  { bg: 'var(--danger-bg)', color: 'var(--danger)' },
+    COMPLETED:      { bg: 'var(--ok-bg)',     color: 'var(--ok)',     label: 'COMPLETED' },
+    // Amber, not red: some of this sale is still good and still counts as
+    // revenue.  Treating it as a full return visually would misread the day.
+    PARTIAL_RETURN: { bg: 'var(--warn-bg)',   color: 'var(--warn)',   label: 'PARTIAL RETURN' },
+    RETURNED:       { bg: 'var(--danger-bg)', color: 'var(--danger)', label: 'RETURNED' },
   };
-  const c = colors[status] || { bg: 'var(--bg)', color: 'var(--text-muted)' };
+  const c = colors[status] || { bg: 'var(--bg)', color: 'var(--text-muted)', label: status };
   return (
     <span style={{
       background: c.bg, color: c.color,
       padding: '3px 10px', borderRadius: 20,
-      fontSize: 12, fontWeight: 600,
+      fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
     }}>
-      {status}
+      {c.label}
     </span>
   );
 }

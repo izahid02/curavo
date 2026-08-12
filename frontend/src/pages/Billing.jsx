@@ -68,13 +68,39 @@ function lineCalc(item) {
   return { taxable, gst, total };
 }
 
+/**
+ * The identity of one bill row: medicine + the physical batch it came from.
+ *
+ * The search dropdown lists one row per batch, so a pharmacist can legitimately
+ * put two boxes of DOLO 650 with different expiry dates on the same bill.  They
+ * share a product_id, so product_id alone would make the two rows collide —
+ * editing one would edit the other.  This key keeps them apart.
+ *
+ * 'auto' covers rows added without a batch (nothing selected a specific box);
+ * those fall back to server-side FEFO at checkout.
+ */
+function lineKeyOf(product) {
+  return `${product.id}::${product.batch_id ?? 'auto'}`;
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Billing() {
   const searchRef = useRef(null);   // keeps a pointer to the search <input>
   const completeSaleRef = useRef(); // ref so F10 always calls the latest version
+  // The scrolling bill-items pane in the left panel.  The search box is pinned
+  // above it, so a long bill scrolls underneath rather than pushing the search
+  // box off-screen — and we scroll this to the bottom after each new item.
+  const billContainerRef = useRef(null);
 
-  // Bill state — each item: { product_id, name, qty, unit_price, gst_rate, unit, current_stock }
+  // Bill state — each item:
+  //   { line_key, product_id, batch_id, batch_number, name, qty, unit_price,
+  //     gst_rate, unit, current_stock, …strip fields }
+  //
+  // WHY line_key AND product_id: the medicine search now returns one row per
+  // BATCH, so the same medicine can legitimately appear twice in one bill —
+  // two boxes with different batch numbers and expiry dates.  product_id can
+  // therefore no longer identify a row.  line_key (product + batch) can.
   const [bill, setBill] = useState([]);
 
   // Payment + optional patient link
@@ -135,6 +161,11 @@ export default function Billing() {
   const [interactionAcknowledged, setInteractionAcknowledged] = useState(false);
   // Track previous bill length so we know when a NEW item was added vs qty changed.
   const prevBillLengthRef = useRef(0);
+  // Same idea, but owned by the auto-scroll effect below.  It gets its own ref
+  // rather than sharing the one above, because that one is reset inside the
+  // interaction effect — whichever effect ran second would see it already
+  // updated and never fire.
+  const scrolledBillLengthRef = useRef(0);
 
   // UI state
   const [completing, setCompleting] = useState(false);
@@ -144,7 +175,8 @@ export default function Billing() {
 
   // Barcode scanner state
   // scanFlash: briefly flashes the search box border green when USB scanner fires
-  // lastScannedId: product_id of the most recently scanned item (row flashes green)
+  // lastScannedId: line_key (product + batch) of the most recently scanned item
+  //                — that row flashes green for a second
   // cameraOpen: controls the camera scanner modal
   // scanNotification: {type:'success'|'warning'|'error', message} shown near search box
   const [scanFlash, setScanFlash]           = useState(false);
@@ -189,7 +221,9 @@ export default function Billing() {
   // When a NEW product is added (bill grows longer), the banner is un-dismissed
   // so the pharmacist cannot miss it.
   useEffect(() => {
-    const ids = bill.map(i => i.product_id);
+    // De-duplicated: two batches of the same medicine are two bill rows but
+    // only one drug as far as an interaction check is concerned.
+    const ids = [...new Set(bill.map(i => i.product_id))];
 
     // A new item was added — lift dismissal so the banner re-shows
     if (bill.length > prevBillLengthRef.current) {
@@ -208,17 +242,43 @@ export default function Billing() {
       .catch(() => { /* non-fatal — silently skip if backend is unreachable */ });
   }, [bill]);
 
+  // ── Keep the newest bill row in view ────────────────────────────────────────
+  // The bill items pane scrolls independently now, so on a long bill a freshly
+  // added medicine lands below the fold and the pharmacist gets no feedback
+  // that the scan worked.  Scroll the pane to the bottom whenever a row is
+  // ADDED (not when a quantity changes, and not when a row is removed).
+  //
+  // ⚠ This has to be an effect, not a line inside addToBill().  addToBill only
+  // queues the state update — the new <tr> does not exist yet at that point, so
+  // scrollHeight would still be the OLD height and we would stop one row short.
+  // By the time an effect runs, React has committed the row to the DOM.
+  useEffect(() => {
+    if (bill.length > scrolledBillLengthRef.current) {
+      const pane = billContainerRef.current;
+      pane?.scrollTo({ top: pane.scrollHeight, behavior: 'smooth' });
+    }
+    scrolledBillLengthRef.current = bill.length;
+  }, [bill.length]);
+
   // ── Add a product to the bill ───────────────────────────────────────────────
-  // `product` is a MedicineSearchResult from MedicineSearchBox:
-  //   { id, name, selling_price, gst_rate, unit, available_stock, ... }
+  // `product` is a MedicineSearchResult from MedicineSearchBox — ONE BATCH of
+  // one medicine:
+  //   { id, batch_id, batch_number, name, selling_price, gst_rate, unit,
+  //     available_stock, rack_location, ... }
   // MedicineSearchBox clears the input and returns focus by itself after
   // calling onSelect, so we only need to update bill state here.
   function addToBill(product) {
+    // Identity of a bill row = medicine + batch.  Picking the same batch twice
+    // bumps the quantity; picking a DIFFERENT batch of the same medicine adds
+    // a second row, because the two boxes have different expiry dates and the
+    // invoice has to record which one actually left the shelf.
+    const lineKey = lineKeyOf(product);
+
     setBill(prev => {
-      const existing = prev.find(i => i.product_id === product.id);
+      const existing = prev.find(i => i.line_key === lineKey);
       if (existing) {
         return prev.map(i =>
-          i.product_id === product.id ? { ...i, qty: i.qty + 1 } : i
+          i.line_key === lineKey ? { ...i, qty: i.qty + 1 } : i
         );
       }
       // Strip medicines (Feature 3) can be billed either as whole strips or as
@@ -234,7 +294,13 @@ export default function Billing() {
         : unitMrp * perStrip;
 
       return [...prev, {
+        line_key:      lineKey,
         product_id:    product.id,
+        // The exact batch the pharmacist picked.  Sent with the invoice so the
+        // server deducts THIS box rather than guessing via FEFO.  null only for
+        // rows that came from somewhere without batch information.
+        batch_id:      product.batch_id ?? null,
+        batch_number:  product.batch_number ?? null,
         name:          product.name,
         // Carried so the bill can auto-detect drip/injection items and only
         // then offer the home-visit charge (Feature 4).
@@ -257,12 +323,12 @@ export default function Billing() {
     });
   }
 
-  function updateQty(product_id, newQty) {
+  function updateQty(line_key, newQty) {
     const n = parseInt(newQty, 10);
     if (isNaN(n) || n < 1) {
-      removeFromBill(product_id);
+      removeFromBill(line_key);
     } else {
-      setBill(prev => prev.map(i => i.product_id === product_id ? { ...i, qty: n } : i));
+      setBill(prev => prev.map(i => i.line_key === line_key ? { ...i, qty: n } : i));
     }
   }
 
@@ -274,9 +340,9 @@ export default function Billing() {
    * 3 strips or 3 tablets depending on the mode, and silently converting it
    * would change the customer's bill without them asking.
    */
-  function setSellMode(product_id, mode) {
+  function setSellMode(line_key, mode) {
     setBill(prev => prev.map(i => {
-      if (i.product_id !== product_id || !i.is_strip) return i;
+      if (i.line_key !== line_key || !i.is_strip) return i;
       return {
         ...i,
         sell_mode:  mode,
@@ -285,8 +351,8 @@ export default function Billing() {
     }));
   }
 
-  function removeFromBill(product_id) {
-    setBill(prev => prev.filter(i => i.product_id !== product_id));
+  function removeFromBill(line_key) {
+    setBill(prev => prev.filter(i => i.line_key !== line_key));
   }
 
   // ── Barcode scanner ─────────────────────────────────────────────────────────
@@ -312,17 +378,27 @@ export default function Billing() {
       const res     = await api.get(`/search/barcode/${barcode}`);
       const product = res.data;
 
+      // Two different reasons the scan can't be billed, and the pharmacist
+      // needs different actions for each: near-expiry stock goes back to the
+      // supplier, an empty shelf gets reordered.
       if (product.out_of_stock) {
-        showScanNotification('warning', `${product.name} — out of stock`);
+        showScanNotification(
+          'warning',
+          product.all_batches_near_expiry
+            ? `${product.name} — all batches expire within 30 days, return to supplier`
+            : `${product.name} — out of stock`,
+        );
         return;
       }
 
-      // addToBill already handles dedup: if the product is already in the bill,
-      // it increments qty by 1 instead of adding a new row.
+      // addToBill already handles dedup: if this exact batch is already in the
+      // bill, it increments qty by 1 instead of adding a new row.
       addToBill(product);
 
-      // Flash the row green briefly
-      setLastScannedId(product.id);
+      // Flash the row green briefly.  Matched on the line key (medicine +
+      // batch) so only the row that actually changed lights up, even when the
+      // bill holds two batches of the same medicine.
+      setLastScannedId(lineKeyOf(product));
       setTimeout(() => setLastScannedId(null), 1000);
 
     } catch (err) {
@@ -540,6 +616,9 @@ export default function Billing() {
         items: bill.map(i => ({
           product_id: i.product_id,
           quantity:   i.sell_mode === 'strip' ? i.qty * i.units_per_strip : i.qty,
+          // The batch the pharmacist actually picked.  The server deducts this
+          // one first and only spills into FEFO order if it runs short.
+          batch_id:   i.batch_id ?? null,
         })),
         patient_id: selectedPatient?.id || null,
         payment_method: paymentMethod,
@@ -945,7 +1024,34 @@ export default function Billing() {
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', height: '100%' }}>
 
         {/* ===== LEFT PANEL: Product Search ===== */}
-        <div style={{ flex: '0 0 60%' }}>
+        {/*
+          A FIXED-HEIGHT FLEX COLUMN, in two parts: the search box is pinned at
+          the top and the bill items scroll underneath it.
+
+          Why: the search dropdown opens directly below the input.  When the
+          whole panel was one long document, the dropdown and the bill items
+          table competed for the same space and the table won — bill rows were
+          painted over the results (see MedicineSearchBox for the stacking-
+          context reason).  Giving the list its own scroll pane means the
+          dropdown always has empty room to open into, no matter how many
+          medicines are on the bill.
+
+          The height is the viewport minus the app chrome around it:
+            68px  Layout's topbar
+            48px  <main>'s 24px padding, top + bottom
+          = calc(100vh - 116px), which exactly fills main's content box so the
+          page itself never gains a second scrollbar.
+        */}
+        <div style={{
+          flex:          '0 0 60%',
+          display:       'flex',
+          flexDirection: 'column',
+          height:        'calc(100vh - 116px)',
+          overflow:      'hidden',
+        }}>
+
+          {/* ── Search area — pinned, never scrolls ── */}
+          <div style={{ flexShrink: 0 }}>
           <div className="card" style={{ padding: 20 }}>
             {/* Header row: title on left, "Scanner active" indicator on right */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -1068,6 +1174,13 @@ export default function Billing() {
                 borderRadius: 'var(--radius-lg)',
                 padding: '14px 16px',
                 position: 'relative',
+                // The banner sits in the PINNED part of the panel so a safety
+                // warning can never be scrolled out of sight.  That makes its
+                // height everyone else's problem, so it is capped: a bill with
+                // several interactions would otherwise squeeze the items list
+                // down to nothing.  Past the cap the banner scrolls itself.
+                maxHeight: '32vh',
+                overflowY: 'auto',
               }}>
                 {/* Header row */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1138,10 +1251,20 @@ export default function Billing() {
               </div>
             );
           })()}
+          </div>
+          {/* ── end pinned search area ── */}
 
-          {/* Items already in the bill (shown below search on mobile or small screens) */}
+          {/* ── Bill items — scrolls, takes whatever height is left ──
+              flex: 1 makes this pane absorb the remaining space, and
+              overflowY: auto keeps its scrollbar inside the pane instead of
+              growing the page.  billContainerRef is what the auto-scroll
+              effect drives after each new item. */}
+          <div
+            ref={billContainerRef}
+            style={{ flex: 1, overflowY: 'auto', marginTop: 12 }}
+          >
           {bill.length > 0 && (
-            <div className="card" style={{ padding: 0, marginTop: 16, overflow: 'hidden' }}>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
@@ -1154,15 +1277,23 @@ export default function Billing() {
                   {bill.map(item => {
                     const { total } = lineCalc(item);
                     // Flash the row green for 1 second after it is scanned
-                    const isJustScanned = item.product_id === lastScannedId;
+                    const isJustScanned = item.line_key === lastScannedId;
                     return (
-                      <tr key={item.product_id} style={{
+                      <tr key={item.line_key} style={{
                         borderBottom: '1px solid var(--border)',
                         background: isJustScanned ? 'rgba(16,185,129,0.10)' : 'transparent',
                         transition: 'background 0.3s ease',
                       }}>
                         <td style={{ padding: '8px 12px' }}>
                           <div style={{ fontWeight: 500 }}>{item.name}</div>
+                          {/* Which physical box this line came from.  With two
+                              batches of the same medicine on one bill, this is
+                              the only thing telling the rows apart. */}
+                          {item.batch_number && (
+                            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>
+                              Batch: {item.batch_number}
+                            </div>
+                          )}
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             GST @ {item.gst_rate}% incl.
                             {/* For strip medicines, spell out what the quantity
@@ -1184,7 +1315,7 @@ export default function Billing() {
                                 return (
                                   <button
                                     key={mode} type="button"
-                                    onClick={() => setSellMode(item.product_id, mode)}
+                                    onClick={() => setSellMode(item.line_key, mode)}
                                     style={{
                                       padding: '2px 9px', borderRadius: 999, fontSize: 10.5, fontWeight: 600,
                                       cursor: 'pointer',
@@ -1208,17 +1339,17 @@ export default function Billing() {
                         <td style={{ padding: '8px 12px', width: 100 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <button
-                              onClick={() => updateQty(item.product_id, item.qty - 1)}
+                              onClick={() => updateQty(item.line_key, item.qty - 1)}
                               style={{ ...qtyBtnStyle }}>−</button>
                             <input
                               type="number"
                               value={item.qty}
                               min={1}
-                              onChange={e => updateQty(item.product_id, e.target.value)}
+                              onChange={e => updateQty(item.line_key, e.target.value)}
                               style={{ width: 48, textAlign: 'center', padding: '4px 6px', fontSize: 13 }}
                             />
                             <button
-                              onClick={() => updateQty(item.product_id, item.qty + 1)}
+                              onClick={() => updateQty(item.line_key, item.qty + 1)}
                               style={{ ...qtyBtnStyle }}>+</button>
                           </div>
                         </td>
@@ -1226,7 +1357,7 @@ export default function Billing() {
                         <td style={{ padding: '8px 12px', fontWeight: 600 }}>{inr(total)}</td>
                         <td style={{ padding: '8px 12px' }}>
                           <button
-                            onClick={() => removeFromBill(item.product_id)}
+                            onClick={() => removeFromBill(item.line_key)}
                             style={{ background: 'transparent', border: 'none', color: 'var(--danger)', fontSize: 18, padding: '2px 6px' }}
                             title="Remove">×</button>
                         </td>
@@ -1237,6 +1368,8 @@ export default function Billing() {
               </table>
             </div>
           )}
+          </div>
+          {/* ── end bill items pane ── */}
         </div>
 
         {/* ===== RIGHT PANEL: Current Bill + Totals ===== */}

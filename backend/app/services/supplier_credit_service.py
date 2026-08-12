@@ -762,6 +762,7 @@ def get_supplier_ledger(db: Session, supplier_id: int) -> Optional[dict]:
             "phone":          supplier.phone,
             "contact_person": supplier.contact_person,
             "gst_number":     supplier.gst_number,
+            "dl_number":      supplier.dl_number,
         },
         "account": {
             "outstanding":     _money(account.outstanding),

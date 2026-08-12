@@ -11,7 +11,9 @@ Then open:    http://localhost:8000/docs   (auto-generated API explorer)
 In production mode, this server also serves the built React frontend
 from frontend/dist/ — no separate Vite dev server needed.
 """
+import hashlib
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import get_db, SessionLocal, init_db
+from app.database import get_db, SessionLocal, init_db, get_app_data_dir
 from app.routers import auth as auth_router
 from app.routers import inventory as inventory_router
 from app.routers import billing as billing_router
@@ -40,6 +42,8 @@ from app.routers import prescriptions as prescriptions_router
 from app.routers import credit as credit_router
 from app.routers import expenditure as expenditure_router
 from app.routers import supplier_credit as supplier_credit_router
+from app.routers import settings as settings_router
+from app.routers import backup as backup_router
 
 
 # ---------------------------------------------------------------------------
@@ -89,9 +93,7 @@ def _seed_admin() -> None:
         # logging (not print): in the frozen Windows build the .exe is built
         # with console=False, so print() output has nowhere to go — only the
         # rotating hcc.log file is readable after the fact.
-        logging.info("Default admin user created (username: admin  password: admin123)")
-        logging.info("Change this password before going live.")
-        print("✅ Default admin user created  (username: admin  password: admin123)")
+        logging.info("Default admin user created. Change password after first login.")
         print("   ⚠️  Change this password before going live.")
     except Exception as exc:
         db.rollback()
@@ -173,34 +175,146 @@ def _seed_doctors() -> None:
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# Migration ledger — a record of WHICH migrations have run
+# ---------------------------------------------------------------------------
+#
+# The old system relied on try/except alone: run every ALTER TABLE on every
+# boot and swallow the "duplicate column name" error.  That never crashes, but
+# it cannot tell the difference between two very different situations:
+#
+#     "this column is already there"   (fine — normal on every restart)
+#     "this ALTER genuinely failed"    (serious — the app will query a column
+#                                       that does not exist)
+#
+# Both looked identical in the log, so a real failure was invisible.  The
+# ledger fixes that by tracking INTENT: a migration that succeeded is written
+# down, and one that failed is NOT — so it is retried on the next start
+# instead of being silently forgotten.
+#
+# Table shape (created on first run, then never changed):
+#     id              INTEGER PRIMARY KEY AUTOINCREMENT
+#     migration_name  TEXT UNIQUE NOT NULL
+#     applied_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+_MIGRATION_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS db_migrations (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_name TEXT UNIQUE NOT NULL,
+    applied_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+# Pulls the table and column out of "ALTER TABLE <t> ADD COLUMN <c> <type...>".
+# Every migration below is that exact shape, which is what lets the migration
+# NAME be derived from the statement instead of typed out by hand — the two can
+# then never drift apart.
+_ALTER_RE = re.compile(r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)", re.IGNORECASE)
+
+
+def _migration_target(sql: str):
+    """Return (table, column) for an ADD COLUMN statement, else (None, None)."""
+    m = _ALTER_RE.search(sql)
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
+def _migration_name(sql: str) -> str:
+    """
+    The stable identity of a migration, e.g. 'add_returned_qty_to_invoice_items'.
+
+    Derived from the SQL rather than hand-written so a typo cannot point the
+    ledger at the wrong statement.  A column name is unique within its table,
+    so table+column is a unique key.  Anything that is not an ADD COLUMN (a
+    future data migration, say) falls back to a hash of the statement itself.
+    """
+    table, column = _migration_target(sql)
+    if table and column:
+        return f"add_{column}_to_{table}"
+    return "sql_" + hashlib.sha1(sql.encode()).hexdigest()[:16]
+
+
+def _ensure_migration_ledger(db) -> None:
+    """Create the db_migrations table if this database has never had one."""
+    db.execute(text(_MIGRATION_LEDGER_DDL))
+    db.commit()
+
+
+def _applied_migration_names(db) -> set:
+    """Every migration_name already recorded, as a set for O(1) lookups."""
+    rows = db.execute(text("SELECT migration_name FROM db_migrations")).fetchall()
+    return {r[0] for r in rows}
+
+
+def _record_migration(db, name: str) -> None:
+    """
+    Write a migration into the ledger.  INSERT OR IGNORE (not plain INSERT)
+    because migration_name is UNIQUE — a duplicate must be a no-op, not an
+    error that aborts the rest of the run.
+    """
+    db.execute(
+        text("INSERT OR IGNORE INTO db_migrations (migration_name) VALUES (:n)"),
+        {"n": name},
+    )
+    db.commit()
+
+
+def _column_exists(db, table: str, column: str) -> bool:
+    """
+    Does this column physically exist right now?
+
+    The ledger records intent, but the SCHEMA is the ground truth — and on an
+    existing pharmacy database the two disagree the first time this build runs:
+    the columns are all there (added by the old try/except system) while the
+    ledger is empty, because nothing was ever writing one.  Checking the real
+    schema is what lets those be adopted instead of re-run.
+
+    PRAGMA table_info returns one row per column: (cid, name, type, notnull,
+    dflt_value, pk) — so r[1] is the column name.  An unknown table returns no
+    rows rather than raising.
+    """
+    try:
+        rows = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    except Exception:
+        db.rollback()
+        return False
+    return any(r[1] == column for r in rows)
+
+
 def _run_db_migrations() -> None:
     """
     Apply incremental column additions that were introduced after the initial
-    schema was created.  Each ALTER TABLE is wrapped in its own try/except so
-    that an already-existing column (which raises an error on SQLite) is
-    silently skipped rather than aborting the whole migration block.
+    schema was created.
 
-    Fresh installs: init_db() (called just before this) creates all columns
-    via create_all(), so these ALTER TABLE statements are no-ops that raise
-    and are caught.
+    Each statement goes through THREE gates, in this order (see the loop below):
 
-    Existing databases being upgraded: init_db() skips existing tables, so
-    these statements add any columns that were added in later phases.
+      1. In the db_migrations ledger?  → skip, it has already run.
+      2. Column physically in the schema? → adopt into the ledger, don't re-run.
+      3. Otherwise → run it, and record it in the ledger only if it SUCCEEDS.
 
-    Phase 3.3 additions:
-      products.days_per_unit              — pharmacist override for refill calc
-      invoice_items.estimated_finish_date — predicted supply run-out date
+    Gate 2 is what makes this safe to ship to a pharmacy that is already
+    running the app.  Their database has every column but an empty ledger,
+    because the previous system used try/except alone and wrote nothing down.
+    Without gate 2 the first upgrade boot would re-attempt 38 doomed ALTERs and
+    log 38 errors; with it, they are quietly adopted and never tried again.
 
-    Windows note: the SQLite build shipped inside the frozen .exe can report a
-    different error type/message for "duplicate column name" than the macOS
-    system SQLite does.  So we catch a BARE Exception per statement and log it
-    rather than matching on the message — an unexpected error here must never
-    take the whole backend down.
+    A failure is NOT recorded, on purpose — it is retried on the next start.
+    Recording it would mark a missing column as done and leave the app querying
+    something that is not there.
+
+    Fresh installs: init_db() (called just before this) creates every column via
+    create_all(), so all statements take gate 2 and the ledger is populated
+    without a single ALTER running.
+
+    Windows note: the SQLite build inside the frozen .exe can report a different
+    error type/message for "duplicate column name" than macOS system SQLite.
+    Nothing here matches on an error message — gate 2 asks the schema directly
+    via PRAGMA — so the two platforms behave identically.
     """
     import logging
 
-    # Every incremental column addition, in one ordered list.  Each statement
-    # runs in its own try/except below, so one failure never blocks the rest.
+    # Every incremental column addition, in one ordered list.  The migration
+    # NAME is derived from each statement (see _migration_name), so adding a
+    # line here is all that is needed — there is no second list to keep in sync.
     migrations = [
         # Phase 3.3 refill prediction
         "ALTER TABLE products ADD COLUMN days_per_unit INTEGER",
@@ -264,29 +378,93 @@ def _run_db_migrations() -> None:
         "ALTER TABLE supplier_returns ADD COLUMN scheme_label TEXT",
         "ALTER TABLE supplier_returns ADD COLUMN bonus_returned INTEGER DEFAULT 0",
         "ALTER TABLE supplier_returns ADD COLUMN paid_returned INTEGER",
+
+        # Drug Licence number on a supplier (Fix 1).  Legally required on every
+        # medicine purchase record, so it lives beside the GSTIN.
+        "ALTER TABLE suppliers ADD COLUMN dl_number TEXT",
+
+        # GST paid on a stock purchase (Fix 7).  cost_price is the ex-GST price
+        # of one unit; these two record the tax and the real money owed, so
+        # supplier credit stops under-counting by the GST amount.
+        "ALTER TABLE stock_purchases ADD COLUMN gst_on_purchase NUMERIC DEFAULT 0",
+        "ALTER TABLE stock_purchases ADD COLUMN total_cost NUMERIC DEFAULT 0",
+
+        # Supplier discount on a stock purchase.  A distributor's "5% trade
+        # discount" or "₹30 off per strip" lowers what the medicine really cost
+        # us, so profit margin and expiry loss must both work off the discounted
+        # figure rather than the rate-card price.
+        #   discount_percent / discount_amount → the discount, in both shapes
+        #   effective_cost                     → cost_price − discount_amount
+        # NULL effective_cost on old rows means "no discount recorded"; readers
+        # fall back to cost_price.
+        "ALTER TABLE stock_purchases ADD COLUMN discount_percent NUMERIC DEFAULT 0",
+        "ALTER TABLE stock_purchases ADD COLUMN discount_amount NUMERIC DEFAULT 0",
+        "ALTER TABLE stock_purchases ADD COLUMN effective_cost NUMERIC",
+
+        # Partial invoice returns (Fix 2).  A customer brings back ONE medicine
+        # off a five-line bill, so a return is tracked per LINE, not per
+        # invoice.  Existing rows default to 0 / not-returned, which is exactly
+        # right: nothing had been partially returned before this existed.
+        #   returned_qty — units of this line handed back so far
+        #   is_returned  — convenience flag for returned_qty == quantity
+        "ALTER TABLE invoice_items ADD COLUMN returned_qty INTEGER DEFAULT 0",
+        "ALTER TABLE invoice_items ADD COLUMN is_returned INTEGER DEFAULT 0",
+        # The invoice-level mirror of the same fact: how much has been refunded
+        # against this bill.  Every revenue query sums total_amount, which after
+        # a partial return overstates what the customer actually paid, so the
+        # dashboards and reports subtract this.  Existing rows default to 0 —
+        # correct, since nothing could have been partially returned before now.
+        "ALTER TABLE invoices ADD COLUMN refunded_amount NUMERIC(12,2) DEFAULT 0",
     ]
 
     db = SessionLocal()
     try:
-        applied = 0
+        _ensure_migration_ledger(db)
+        already = _applied_migration_names(db)
+
+        applied = skipped = adopted = failed = 0
         for sql in migrations:
+            name = _migration_name(sql)
+
+            # (1) The ledger already has it — nothing to do.  This is the
+            #     normal path on every restart after the first, and it means a
+            #     settled database issues ZERO ALTER statements at boot.
+            if name in already:
+                skipped += 1
+                continue
+
+            # (2) Not in the ledger, but the column is physically present.
+            #     This is every EXISTING pharmacy database, the first time it
+            #     runs this build: the old try/except system added the columns
+            #     but kept no record of doing so.  Adopt them into the ledger
+            #     so the next boot takes path (1) instead of retrying an ALTER
+            #     that is guaranteed to fail.
+            table, column = _migration_target(sql)
+            if table and column and _column_exists(db, table, column):
+                _record_migration(db, name)
+                adopted += 1
+                continue
+
+            # (3) Genuinely new — run it, and record it ONLY if it succeeds.
             try:
                 db.execute(text(sql))
                 db.commit()
+                _record_migration(db, name)
                 applied += 1
-                logging.info(f"Migration applied: {sql[:60]}")
+                logging.info(f"Migration applied: {name}")
             except Exception as e:
-                # Almost always "duplicate column name" — the column is already
-                # there, which is the normal case on every restart after the
-                # first.  We log at INFO (not ERROR) so hcc.log stays readable,
-                # but we DO log the message: if a migration ever fails for a
-                # real reason on Windows, this line is the only evidence.
+                # Deliberately NOT recorded.  An unrecorded migration is retried
+                # on the next start; recording a failure would mark a missing
+                # column as done and leave the app querying a column that is not
+                # there.  Logged at ERROR because, unlike the old system, this
+                # branch no longer catches the ordinary "already exists" case —
+                # step (2) handles that — so reaching here is a REAL problem.
                 db.rollback()
-                # Only the first line of the exception — SQLAlchemy's full
-                # message spans three lines per statement, which would bury
-                # the rest of the startup trace in 100 lines of noise.
+                failed += 1
                 reason = str(e).splitlines()[0]
-                logging.info(f"Migration skipped (already applied): {sql[:50]}... {reason}")
+                logging.error(
+                    f"Migration FAILED (will retry on next start): {name} — {reason}"
+                )
 
         # Backfill for was_overdue: anything sitting in OVERDUE right now is, by
         # definition, already late — mark it so day-one data is not silently
@@ -303,8 +481,9 @@ def _run_db_migrations() -> None:
             logging.info(f"was_overdue backfill skipped: {e}")
 
         logging.info(
-            f"Migrations complete: {applied} applied, "
-            f"{len(migrations) - applied} skipped"
+            f"Migrations complete: {applied} applied, {adopted} adopted "
+            f"(already in schema), {skipped} skipped (already in ledger), "
+            f"{failed} FAILED — {len(migrations)} total"
         )
     finally:
         db.close()
@@ -335,6 +514,33 @@ def _seed_home_visit_charge() -> None:
     except Exception as exc:
         db.rollback()
         print(f"⚠️  Could not seed home visit charge on startup: {exc}")
+    finally:
+        db.close()
+
+
+def _seed_pharmacy_settings() -> None:
+    """
+    Make sure exactly one pharmacy_settings row exists (Fix 7).
+
+    Like the home-visit charge above, this is a SETTINGS row, not a log: we
+    only ever create it when missing, so an owner who renamed the shop does
+    not find "Health Care Centre" back on the sign after a restart.
+    """
+    db = SessionLocal()
+    try:
+        from app.models.settings import PharmacySettings
+
+        existing = db.query(PharmacySettings).first()
+        if existing is None:
+            db.add(PharmacySettings(
+                pharmacy_name="Health Care Centre",
+                pharmacy_tagline="Pharmacy & Medical Store",
+            ))
+            db.commit()
+            print("✅ Seeded default pharmacy settings")
+    except Exception as exc:
+        db.rollback()
+        print(f"⚠️  Could not seed pharmacy settings on startup: {exc}")
     finally:
         db.close()
 
@@ -605,75 +811,6 @@ def _seed_drug_interactions() -> None:
         db.close()
 
 
-def _seed_expenditure_demo() -> None:
-    """
-    Populate the Expenditure module with a little demo data on a fresh install
-    so the new page isn't empty on first open.
-
-    Runs only once — if any employees already exist, the whole seed is skipped
-    so the owner's real staff/expenses are never touched on restart.
-
-    Seeds:
-      2 employees  — Inzamamul Hoque (Pharmacist), Demo Assistant (Shop Assistant)
-      3 expenses for the current month — electricity, rent, and one advance.
-    """
-    from datetime import date
-    from decimal import Decimal
-
-    db = SessionLocal()
-    try:
-        from app.models.expenditure import Employee, Expense
-
-        if db.query(Employee).count() > 0:
-            return  # already seeded — leave real data alone
-
-        # --- Employees ---------------------------------------------------
-        emp1 = Employee(
-            name="Inzamamul Hoque",
-            role="Pharmacist",
-            basic_salary=Decimal("8000"),
-            hra=Decimal("1500"),
-            travel_allowance=Decimal("500"),
-            other_allowance=Decimal("0"),
-            is_active=True,
-        )
-        emp2 = Employee(
-            name="Demo Assistant",
-            role="Shop Assistant",
-            basic_salary=Decimal("6000"),
-            hra=Decimal("1000"),
-            travel_allowance=Decimal("0"),
-            other_allowance=Decimal("0"),
-            is_active=True,
-        )
-        db.add_all([emp1, emp2])
-        db.flush()   # assign ids so the advance expense can reference emp1
-
-        # --- Expenses for the current month ------------------------------
-        today = date.today()
-        db.add_all([
-            Expense(
-                date=today, category="UTILITY", description="Electricity bill",
-                amount=Decimal("1500"), payment_mode="CASH", paid_to="Electricity Board",
-            ),
-            Expense(
-                date=today, category="SHOP", description="Shop rent",
-                amount=Decimal("5000"), payment_mode="CASH", paid_to="Landlord",
-            ),
-            Expense(
-                date=today, category="ADVANCE", description="Salary advance (personal)",
-                amount=Decimal("1000"), payment_mode="CASH", paid_to=emp1.name,
-                employee_id=emp1.id,
-            ),
-        ])
-        db.commit()
-        print("✅ Seeded 2 demo employees + 3 demo expenses (Expenditure module)")
-    except Exception as exc:
-        db.rollback()
-        print(f"⚠️  Could not seed expenditure demo data: {exc}")
-    finally:
-        db.close()
-
 
 async def _daily_credit_reminders_task() -> None:
     """
@@ -698,12 +835,109 @@ async def _daily_credit_reminders_task() -> None:
         await asyncio.sleep(86_400)
 
 
+# ---------------------------------------------------------------------------
+# Automatic backup, taken BEFORE anything touches the database
+# ---------------------------------------------------------------------------
+
+# How many automatic startup backups to keep.  Seven is roughly a week of
+# daily opens for a shop that starts the app once each morning.
+STARTUP_BACKUPS_TO_KEEP = 7
+
+
+def _backup_on_startup() -> None:
+    """
+    Copy the database to a timestamped file before migrations run.
+
+    This is the safety net for the whole upgrade story: if an update ever
+    corrupts data, the state from just before that update is still on disk.
+    It runs FIRST in the lifespan — ahead of init_db() and the migrations —
+    because a backup taken after a bad migration has already lost the thing
+    you wanted to recover.
+
+    ⚠ WHY THIS DOES NOT USE shutil.copy2
+    ------------------------------------
+    The database runs in WAL mode (see database.py's PRAGMA block).  In WAL
+    mode a committed transaction is written to a SEPARATE pharmacy.db-wal file
+    and only folded back into pharmacy.db at a checkpoint.  Between
+    checkpoints, pharmacy.db can be badly out of date — on this dev machine
+    pharmacy.db was 528 KB from Jul 30 while pharmacy.db-wal held 3.7 MB of
+    newer data.  Copying pharmacy.db alone would have produced a backup
+    missing two weeks of sales, and it would have looked like it worked.
+
+    sqlite3's online backup API reads through the WAL and writes ONE
+    self-contained file, so the result is a complete, consistent snapshot that
+    can be restored by itself.  It is also safe to run while the app holds the
+    database open, which matters because uvicorn may already have connections.
+
+    Failure here is logged and swallowed: not being able to take a backup is a
+    reason to warn the owner, never a reason to stop the pharmacy opening.
+    """
+    import logging
+    import sqlite3
+    from datetime import datetime
+
+    try:
+        db_path = get_app_data_dir() / "pharmacy.db"
+        if not db_path.exists():
+            logging.info("Startup backup skipped: no database yet (first run)")
+            return
+
+        backup_dir = get_app_data_dir() / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = backup_dir / f"startup_{timestamp}.db"
+        # The timestamp only resolves to the SECOND, so two starts inside the
+        # same second would land on the same filename and the second would
+        # overwrite the first.  That is not hypothetical: `uvicorn --reload`
+        # restarts several times in a row while a file is being edited, and it
+        # cost us four of five backups the first time this was tested.  Add a
+        # suffix rather than silently replacing an existing snapshot.
+        counter = 2
+        while backup_path.exists():
+            backup_path = backup_dir / f"startup_{timestamp}_{counter}.db"
+            counter += 1
+
+        # Online backup API — consistent snapshot, WAL included.
+        source = sqlite3.connect(str(db_path))
+        try:
+            dest = sqlite3.connect(str(backup_path))
+            try:
+                source.backup(dest)
+            finally:
+                dest.close()
+        finally:
+            source.close()
+
+        size_kb = backup_path.stat().st_size / 1024
+        logging.info(f"Startup backup created: {backup_path.name} ({size_kb:.0f} KB)")
+
+        # Prune: keep only the newest STARTUP_BACKUPS_TO_KEEP automatic backups.
+        # Sorted oldest-first, so [:-7] is "everything except the newest 7".
+        # Only startup_*.db is touched — manual backups are never deleted.
+        startup_backups = sorted(
+            backup_dir.glob("startup_*.db"),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for old in startup_backups[:-STARTUP_BACKUPS_TO_KEEP]:
+            try:
+                old.unlink()
+                logging.info(f"Old startup backup removed: {old.name}")
+            except Exception as exc:
+                logging.warning(f"Could not remove old backup {old.name}: {exc}")
+
+    except Exception as exc:
+        # A missing backup must never block startup — log loudly and continue.
+        logging.error(f"Startup backup FAILED (continuing anyway): {exc}")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """
     Code before the 'yield' runs at startup; code after runs at shutdown.
 
     Order matters:
+      0. _backup_on_startup()  — snapshot the DB before ANYTHING touches it
       1. init_db()      — create all tables that do not exist yet (SQLite)
       2. _run_db_migrations() — add columns introduced after the schema was created
       3. seed functions — populate default rows if tables are empty
@@ -712,6 +946,11 @@ async def lifespan(_app: FastAPI):
     import asyncio
     import logging
     import traceback
+
+    # Step 0 — the backup comes before init_db() and before the migrations,
+    # because a snapshot taken afterwards has already lost whatever a bad
+    # migration destroyed.  This function never raises (see its docstring).
+    _backup_on_startup()
 
     # init_db() is the single most likely place for the desktop build to die:
     # it imports every ORM model and issues CREATE TABLE against the SQLite
@@ -738,8 +977,8 @@ async def lifespan(_app: FastAPI):
         ("seed_doctors",          _seed_doctors),
         ("seed_message_templates", _seed_message_templates),
         ("seed_drug_interactions", _seed_drug_interactions),
-        # ("seed_expenditure_demo", _seed_expenditure_demo),  # disabled — no demo data
         ("seed_home_visit_charge", _seed_home_visit_charge),
+        ("seed_pharmacy_settings", _seed_pharmacy_settings),
     ]
     for name, step in steps:
         try:
@@ -850,6 +1089,11 @@ app.include_router(expenditure_router.router, prefix="/api")
 # Supplier Credit (money WE owe suppliers): /api/supplier-credit/summary,
 # /suppliers, /supplier/{id}, /payment, /due-soon
 app.include_router(supplier_credit_router.router, prefix="/api")
+
+# Shop-wide identity: GET /api/settings/pharmacy (public — the login screen and
+# the receipt both read it), PUT /api/settings/pharmacy (Owner/Admin only).
+app.include_router(settings_router.router, prefix="/api")
+app.include_router(backup_router.router, prefix="/api")
 
 
 @app.get("/health")

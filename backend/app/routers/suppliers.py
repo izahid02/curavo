@@ -87,6 +87,7 @@ def create_supplier(
         phone=body.phone,
         address=body.address,
         gst_number=body.gst_number,
+        dl_number=body.dl_number,
     )
     db.add(supplier)
     db.commit()

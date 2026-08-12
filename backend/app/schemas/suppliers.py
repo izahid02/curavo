@@ -18,6 +18,9 @@ class SupplierCreate(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     gst_number: Optional[str] = None   # GSTIN — 15-char alphanumeric (validation optional for now)
+    # Drug Licence number — the licence that lets this distributor sell
+    # medicines.  Free text: formats vary by state, so we do not validate it.
+    dl_number: Optional[str] = None
 
 
 class SupplierUpdate(BaseModel):
@@ -27,6 +30,7 @@ class SupplierUpdate(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     gst_number: Optional[str] = None
+    dl_number: Optional[str] = None
 
 
 class SupplierOut(BaseModel):
@@ -37,6 +41,7 @@ class SupplierOut(BaseModel):
     phone: Optional[str]
     address: Optional[str]
     gst_number: Optional[str]
+    dl_number: Optional[str] = None
     created_at: datetime
     # How many stock batches reference this supplier.
     # Useful for the UI to warn before deleting a supplier that has history.

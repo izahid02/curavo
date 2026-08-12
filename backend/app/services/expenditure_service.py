@@ -328,7 +328,27 @@ def settle_salary(
 # ---------------------------------------------------------------------------
 
 def _sales_split(db: Session, day: date) -> tuple[Decimal, Decimal]:
-    """Return (cash_sales, upi_sales) for a single day from completed invoices."""
+    """
+    Return (cash_sales, upi_sales) for a single day from non-returned invoices.
+
+    ⚠ DELIBERATELY *NOT* NET OF PARTIAL-RETURN REFUNDS — unlike every other
+    revenue query in the app (see app/services/revenue.py).  This is the reason:
+
+    This figure feeds the DRAWER reconciliation in get_cash_register(), where
+    the owner compares it against cash they have physically counted.  Every
+    invoice here is bucketed by invoice_date, so subtracting invoices.
+    refunded_amount would book a refund on the day of the ORIGINAL SALE, not
+    the day the money actually left the till.  Refund a ₹400 item today against
+    last Tuesday's bill and last Tuesday — a day already counted, closed and
+    signed off — would silently turn into a ₹400 shortage.
+
+    Doing it properly needs two things the return flow does not record yet: WHEN
+    the refund happened, and in what TENDER (cash back from the drawer vs a UPI
+    reversal).  Until those exist, leaving the sale whole keeps every closed day
+    stable, which is what a reconciliation tool is for.  A same-day cash refund
+    therefore still shows as a drawer shortage on the day — visible and
+    explainable, rather than a number that rewrites history.
+    """
     # invoice_date is UTC; filter on the UTC window of this IST calendar day so a
     # late-evening IST sale is counted on the correct day (not the previous one).
     day_start, day_end = ist_day_bounds_utc(day)

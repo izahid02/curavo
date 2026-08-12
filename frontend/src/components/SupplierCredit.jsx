@@ -257,6 +257,18 @@ function HistoryPanel({ supplierId, onClose }) {
             {ledger?.supplier?.phone && (
               <p style={{ fontSize: 13, color: '#9ca3af' }}>{ledger.supplier.phone}</p>
             )}
+            {/* Licence / tax identifiers — handy to have on screen while
+                reconciling a paper invoice against this ledger. */}
+            {(ledger?.supplier?.gst_number || ledger?.supplier?.dl_number) && (
+              <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {ledger.supplier.gst_number && (
+                  <span>GST: <span style={{ fontFamily: 'monospace', color: '#6366f1' }}>{ledger.supplier.gst_number}</span></span>
+                )}
+                {ledger.supplier.dl_number && (
+                  <span>DL: <span style={{ fontFamily: 'monospace', color: '#059669' }}>{ledger.supplier.dl_number}</span></span>
+                )}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
