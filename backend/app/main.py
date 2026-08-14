@@ -12,6 +12,7 @@ In production mode, this server also serves the built React frontend
 from frontend/dist/ — no separate Vite dev server needed.
 """
 import hashlib
+import logging
 import os
 import re
 import sys
@@ -49,6 +50,28 @@ from app.routers import backup as backup_router
 # ---------------------------------------------------------------------------
 # Startup: create a default admin user on a fresh installation
 # ---------------------------------------------------------------------------
+#
+# ⚠ EVERY STARTUP MESSAGE IN THIS FILE IS PLAIN ASCII, AND USES logging —
+#   NEVER print().  Both halves of that rule matter on Windows:
+#
+#   1. print() writes to sys.stdout, which on a Windows console defaults to the
+#      cp1252 encoding.  cp1252 cannot represent emoji, so print("✅ ...")
+#      raises UnicodeEncodeError — a REAL exception, raised at the print call,
+#      that aborts whatever function it is sitting in.  That is not theoretical:
+#      the emoji print used to sit AFTER the commit inside _seed_admin, so the
+#      admin user was created, the print blew up, the except branch caught it,
+#      and the log said "Could not create admin user" about an account that
+#      existed.  A support call chasing a bug that was purely cosmetic.
+#   2. logging goes to the rotating hcc.log file, which main_desktop.py opens
+#      with encoding="utf-8".  logging also never lets an encoding problem reach
+#      the caller (a failing handler is reported internally, not raised), so a
+#      log line can never abort a seed function the way a print can.
+#
+#   The comments and docstrings in this file still use em-dashes freely — the
+#   source is read as UTF-8 and never re-encoded, so only the strings that get
+#   WRITTEN OUT at runtime are constrained.  The Assamese message-template text
+#   further down is data bound for the database, not console output, and must
+#   stay exactly as it is.
 
 def _seed_admin() -> None:
     """
@@ -58,8 +81,13 @@ def _seed_admin() -> None:
 
     Credentials:  username = admin   password = admin123
     The owner should change the password after the first login.
+
+    This is the ONE startup step the pharmacy cannot open without: no user row
+    means nobody can log in at all.  It therefore keeps its own try/except (on
+    top of the per-step guard in lifespan) and says plainly in the log which of
+    the three outcomes happened — created / already existed / failed — because
+    hcc.log is the only thing a technician can read after a bad Windows launch.
     """
-    import logging
     import traceback
 
     db = SessionLocal()
@@ -69,8 +97,11 @@ def _seed_admin() -> None:
         from app.models.user import Role, User
         from app.services.auth_service import hash_password
 
-        if db.query(User).count() > 0:
-            logging.info("Admin seed: users already exist — skipping")
+        existing = db.query(User).count()
+        if existing > 0:
+            logging.info(
+                f"Admin seed: SKIPPED - {existing} user(s) already exist"
+            )
             return  # Users already exist — nothing to do
 
         # The "Owner" role should already exist from the schema.sql seed data.
@@ -80,6 +111,7 @@ def _seed_admin() -> None:
             role = Role(name="Owner")
             db.add(role)
             db.flush()   # flush so role.id is assigned before we use it below
+            logging.info("Admin seed: 'Owner' role was missing - created it")
 
         admin = User(
             username="admin",
@@ -90,14 +122,16 @@ def _seed_admin() -> None:
         )
         db.add(admin)
         db.commit()
-        # logging (not print): in the frozen Windows build the .exe is built
-        # with console=False, so print() output has nowhere to go — only the
-        # rotating hcc.log file is readable after the fact.
-        logging.info("Default admin user created. Change password after first login.")
-        print("   ⚠️  Change this password before going live.")
+        # Nothing but logging after the commit.  A print() here is what used to
+        # turn a SUCCESSFUL seed into a logged failure on Windows (see the note
+        # above this function).
+        logging.info(
+            "Admin seed: CREATED default user 'admin' (password 'admin123'). "
+            "WARNING: change this password before going live."
+        )
     except Exception as exc:
         db.rollback()
-        logging.error(f"Could not create admin user on startup: {exc}")
+        logging.error(f"Admin seed: FAILED - could not create admin user: {exc}")
         logging.error(traceback.format_exc())
     finally:
         db.close()
@@ -139,10 +173,10 @@ def _seed_tags() -> None:
         for name in default_tags:
             db.add(Tag(name=name))
         db.commit()
-        print(f"✅ Seeded {len(default_tags)} default patient tags")
+        logging.info(f"Seeded {len(default_tags)} default patient tags")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not seed patient tags: {exc}")
+        logging.warning(f"Could not seed patient tags: {exc}")
     finally:
         db.close()
 
@@ -167,10 +201,10 @@ def _seed_doctors() -> None:
         for name, spec in defaults:
             db.add(Doctor(name=name, specialization=spec))
         db.commit()
-        print(f"✅ Seeded {len(defaults)} default doctors")
+        logging.info(f"Seeded {len(defaults)} default doctors")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not seed doctors on startup: {exc}")
+        logging.warning(f"Could not seed doctors on startup: {exc}")
     finally:
         db.close()
 
@@ -310,8 +344,6 @@ def _run_db_migrations() -> None:
     Nothing here matches on an error message — gate 2 asks the schema directly
     via PRAGMA — so the two platforms behave identically.
     """
-    import logging
-
     # Every incremental column addition, in one ordered list.  The migration
     # NAME is derived from each statement (see _migration_name), so adding a
     # line here is all that is needed — there is no second list to keep in sync.
@@ -463,7 +495,7 @@ def _run_db_migrations() -> None:
                 failed += 1
                 reason = str(e).splitlines()[0]
                 logging.error(
-                    f"Migration FAILED (will retry on next start): {name} — {reason}"
+                    f"Migration FAILED (will retry on next start): {name} - {reason}"
                 )
 
         # Backfill for was_overdue: anything sitting in OVERDUE right now is, by
@@ -483,7 +515,7 @@ def _run_db_migrations() -> None:
         logging.info(
             f"Migrations complete: {applied} applied, {adopted} adopted "
             f"(already in schema), {skipped} skipped (already in ledger), "
-            f"{failed} FAILED — {len(migrations)} total"
+            f"{failed} FAILED - {len(migrations)} total"
         )
     finally:
         db.close()
@@ -510,10 +542,10 @@ def _seed_home_visit_charge() -> None:
                 is_active=True,
             ))
             db.commit()
-            print("✅ Seeded default home visit charge (Rs.100)")
+            logging.info("Seeded default home visit charge (Rs.100)")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not seed home visit charge on startup: {exc}")
+        logging.warning(f"Could not seed home visit charge on startup: {exc}")
     finally:
         db.close()
 
@@ -537,10 +569,10 @@ def _seed_pharmacy_settings() -> None:
                 pharmacy_tagline="Pharmacy & Medical Store",
             ))
             db.commit()
-            print("✅ Seeded default pharmacy settings")
+            logging.info("Seeded default pharmacy settings")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not seed pharmacy settings on startup: {exc}")
+        logging.warning(f"Could not seed pharmacy settings on startup: {exc}")
     finally:
         db.close()
 
@@ -571,10 +603,10 @@ def _update_admin_details() -> None:
 
         if changed:
             db.commit()
-            print("✅ Admin profile details updated (full_name / email)")
+            logging.info("Admin profile details updated (full_name / email)")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not update admin details: {exc}")
+        logging.warning(f"Could not update admin details: {exc}")
     finally:
         db.close()
 
@@ -751,10 +783,10 @@ def _seed_message_templates() -> None:
                 inserted += 1
 
         db.commit()
-        print(f"✅ Message templates: {inserted} inserted, {updated} updated")
+        logging.info(f"Message templates: {inserted} inserted, {updated} updated")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not seed message templates: {exc}")
+        logging.warning(f"Could not seed message templates: {exc}")
     finally:
         db.close()
 
@@ -803,10 +835,10 @@ def _seed_drug_interactions() -> None:
                 recommendation=recommendation,
             ))
         db.commit()
-        print(f"✅ Seeded {len(seed_data)} drug interaction rules")
+        logging.info(f"Seeded {len(seed_data)} drug interaction rules")
     except Exception as exc:
         db.rollback()
-        print(f"⚠️  Could not seed drug interactions: {exc}")
+        logging.warning(f"Could not seed drug interactions: {exc}")
     finally:
         db.close()
 
@@ -818,7 +850,6 @@ async def _daily_credit_reminders_task() -> None:
     Wrapped in a try/except so a failure never crashes the application.
     """
     import asyncio
-    import logging
     while True:
         try:
             from app.services.credit_service import send_due_credit_reminders
@@ -872,7 +903,6 @@ def _backup_on_startup() -> None:
     Failure here is logged and swallowed: not being able to take a backup is a
     reason to warn the owner, never a reason to stop the pharmacy opening.
     """
-    import logging
     import sqlite3
     from datetime import datetime
 
@@ -944,7 +974,6 @@ async def lifespan(_app: FastAPI):
       4. background tasks — start daily credit reminder scheduler
     """
     import asyncio
-    import logging
     import traceback
 
     # Step 0 — the backup comes before init_db() and before the migrations,
@@ -966,9 +995,23 @@ async def lifespan(_app: FastAPI):
         logging.error(traceback.format_exc())
         raise            # re-raise so startup fails loudly
 
-    # Each remaining startup step is logged individually.  If the app ever dies
-    # mid-startup again, the LAST line in hcc.log tells us exactly which step
-    # was running — that is the whole point of this trace.
+    # ⚠ EVERY STEP IS ISOLATED — ONE FAILURE MUST NEVER STOP THE REST.
+    #
+    # These steps are NOT independent in importance: seed_admin is the only one
+    # the pharmacy genuinely cannot open without (no user row = nobody can log
+    # in), and it sits in the middle of a list of purely cosmetic seeds.  If the
+    # loop stopped at the first exception, a broken message template — content,
+    # not correctness — would lock the owner out of their own shop.  So each
+    # step gets its own try/except and the loop always runs to the end.
+    #
+    # Order still matters even though failures don't stop it: migrations run
+    # first because seed_admin INSERTs a User through the ORM, and the ORM model
+    # knows about columns (email, phone, avatar_path) that only exist after the
+    # migrations have added them.  update_admin_details then needs that same
+    # email column, so it follows seed_admin.
+    #
+    # Each step is logged individually, so if the app ever dies mid-startup the
+    # LAST line in hcc.log names exactly which step was running.
     steps = [
         ("run_db_migrations",     _run_db_migrations),
         ("seed_admin",            _seed_admin),
@@ -980,6 +1023,7 @@ async def lifespan(_app: FastAPI):
         ("seed_home_visit_charge", _seed_home_visit_charge),
         ("seed_pharmacy_settings", _seed_pharmacy_settings),
     ]
+    failed_steps = []
     for name, step in steps:
         try:
             logging.info(f"Startup step: {name}...")
@@ -989,10 +1033,19 @@ async def lifespan(_app: FastAPI):
             # Seeding default rows is convenience, not correctness — a failure
             # here must never stop the pharmacy from opening the app, so we log
             # and continue instead of re-raising (unlike init_db above).
-            logging.error(f"Startup step '{name}' failed: {e}")
+            failed_steps.append(name)
+            logging.error(f"Startup step '{name}' FAILED (continuing): {e}")
             logging.error(traceback.format_exc())
 
-    logging.info("All startup steps complete — application is ready")
+    # A single summary line, so a technician reading hcc.log after a bad launch
+    # sees what broke without scrolling back through every step.
+    if failed_steps:
+        logging.error(
+            f"Startup finished with {len(failed_steps)} failed step(s): "
+            f"{', '.join(failed_steps)} - application is still serving"
+        )
+    else:
+        logging.info("All startup steps complete - application is ready")
 
     # Start the credit reminder background task
     task = asyncio.create_task(_daily_credit_reminders_task())
