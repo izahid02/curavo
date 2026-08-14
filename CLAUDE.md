@@ -727,6 +727,26 @@ body::before adds animated radial orbs (orbShift 12s animation).
   something looks wrong and the source looks correct, ask for a SCREENSHOT
   early — grep and build checks are structurally blind to that whole class of
   bug, and re-checking them harder just wastes the user's time.
+- ALL RUNTIME STRINGS WRITTEN TO stdout, stderr OR A LOG HANDLER MUST BE
+  ASCII-ONLY. Emoji and Unicode characters in print() or logging calls crash on
+  Windows cp1252. Use plain English equivalents: WARNING not ⚠️, OK not ✅.
+  ⚠ This is a CRASH, not a cosmetic issue, and macOS can never reproduce it:
+  print() raises UnicodeEncodeError AT THE CALL SITE, aborting whatever function
+  it sits in. In Aug 2026 the emoji line in main.py's _seed_admin() sat one line
+  AFTER db.commit(), so the admin user WAS created, the print then raised, the
+  except branch caught it and logged "Could not create admin user" about an
+  account that existed — the log actively pointed debugging the wrong way.
+  Prefer logging over print(): hcc.log is opened encoding="utf-8" by
+  main_desktop.py, and the logging module never lets a handler's encoding
+  failure reach the caller. print() has no such protection (and in the frozen
+  console=False build has no stdout at all — see §10 / main_desktop.py).
+  This constrains only strings EMITTED at runtime. Comments, docstrings and the
+  Assamese message-template data stay as they are — source is read as UTF-8 and
+  never re-encoded to a console.
+  Verify by running the code with stdout forced to the Windows encoding:
+    sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252",
+                                  errors="strict")
+  (point HCC_DATA_DIR at a sandbox first, per §10).
 
 ---
 
