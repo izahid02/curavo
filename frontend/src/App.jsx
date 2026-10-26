@@ -18,6 +18,7 @@ import Marketing from './pages/Marketing.jsx';
 import Credit from './pages/Credit.jsx';
 import Expenditure from './pages/Expenditure.jsx';
 import Backup from './pages/Backup.jsx';
+import Register from './pages/Register.jsx';
 
 /**
  * Detect whether we are running inside the Tauri desktop shell (as opposed to
@@ -118,6 +119,8 @@ export default function App() {
         <Route path="/expenditure"   element={<Expenditure />} />
         <Route path="/reports"       element={<Reports />} />
         <Route path="/backup"        element={<Backup />} />
+        {/* Schedule H1 / MTP register — the legal record of regulated sales. */}
+        <Route path="/register"      element={<Register />} />
         <Route path="/follow-ups"   element={<FollowUps />} />
         <Route path="/marketing"    element={<Marketing />} />
         <Route path="/credit"       element={<Credit />} />

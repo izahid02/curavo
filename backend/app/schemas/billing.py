@@ -61,6 +61,11 @@ class CreateInvoiceRequest(BaseModel):
     payment_method:   str            = Field(default="CASH", pattern="^(CASH|UPI|CARD|CREDIT)$")
     discount_amount:  Decimal        = Field(default=Decimal("0"), ge=0)
     referred_by:      Optional[str]  = None   # doctor/referrer name for this invoice
+    # The prescriber's ADDRESS.  Required only when the bill contains a
+    # Schedule H1 or MTP medicine: the register asks for "name and address of
+    # the prescriber", not the name alone.  Optional on every other sale, so
+    # ordinary billing is untouched.
+    referred_by_address: Optional[str] = None
     # Credit-specific fields (only used when payment_method == 'CREDIT')
     amount_paid:      Decimal        = Field(default=Decimal("0"), ge=0)
     credit_due_date:  Optional[date] = None

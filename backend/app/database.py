@@ -191,6 +191,10 @@ def init_db():
     # Shop-wide identity (Fix 7).  It is a brand-new TABLE, not a column, so it
     # is created here by create_all() rather than by an ALTER in main.py.
     import app.models.settings           # noqa: F401
+    # The Schedule H1 / MTP register.  Also a brand-new TABLE, so it arrives
+    # the same way; the products.register_category COLUMN that decides what
+    # goes into it is an ALTER in main.py, as columns always are.
+    import app.models.regulated          # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

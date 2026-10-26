@@ -23,6 +23,7 @@ const PAGE_TITLES = {
   '/follow-ups':    'Follow-Ups',
   '/marketing':     'Marketing',
   '/credit':        'Credit Management',
+  '/register':      'H1 & MTP Register',
 };
 
 /**
@@ -38,6 +39,7 @@ const PAGE_SUBTITLES = {
   '/patients':      'Patient records and history',
   '/follow-ups':    'Patient follow-up management',
   '/credit':        'Credit accounts and payments',
+  '/register':      'Schedule H1 and MTP kit sales — kept for three years',
   '/marketing':     'Campaigns and messaging',
   '/suppliers':     'Supplier management',
   '/expenditure':   'Expenses, salaries and daily cash register',
@@ -564,6 +566,17 @@ export default function Layout() {
               <line x1="6" y1="20" x2="6" y2="14"/>
             </svg>
             Reports
+          </NavLink>
+
+          <NavLink to="/register" className={navClass}>
+            {/* Clipboard with a line — a record being kept */}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <path d="M9 2h6a1 1 0 0 1 1 1v2H8V3a1 1 0 0 1 1-1z"/>
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+              <line x1="8" y1="11" x2="16" y2="11"/>
+              <line x1="8" y1="15" x2="13" y2="15"/>
+            </svg>
+            Register
           </NavLink>
 
           <NavLink to="/backup" className={navClass}>

@@ -45,6 +45,7 @@ from app.routers import expenditure as expenditure_router
 from app.routers import supplier_credit as supplier_credit_router
 from app.routers import settings as settings_router
 from app.routers import backup as backup_router
+from app.routers import regulated as regulated_router
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +448,36 @@ def _run_db_migrations() -> None:
         # dashboards and reports subtract this.  Existing rows default to 0 —
         # correct, since nothing could have been partially returned before now.
         "ALTER TABLE invoices ADD COLUMN refunded_amount NUMERIC(12,2) DEFAULT 0",
+
+        # Multi-page prescriptions.
+        #
+        # A doctor's pad routinely runs to two or three sheets.  Each page is
+        # its own prescriptions row (that table always allowed many rows per
+        # patient and per invoice), and these two columns are what tie the
+        # pages of ONE prescription back together:
+        #   group_id    — the same value on every page uploaded in one go
+        #   page_number — 1-based position within that group
+        #
+        # Both are NULL on every row written before this.  A NULL group_id
+        # means "a prescription of one page, on its own", which is exactly
+        # what those older rows are — so nothing already in the pharmacy's
+        # database needs rewriting, and nothing about it displays differently.
+        "ALTER TABLE prescriptions ADD COLUMN group_id TEXT",
+        "ALTER TABLE prescriptions ADD COLUMN page_number INTEGER",
+
+        # Schedule H1 / MTP register.
+        #
+        # Which register, if any, a medicine's sale has to be written into:
+        # 'H1', 'MTP', or NULL for the ordinary medicines that are most of the
+        # shelf.  NULL on every existing row, which is correct — a medicine is
+        # only regulated once the pharmacist has CONFIRMED the match, and that
+        # confirmation is the whole point of the flagging screen.  Nothing is
+        # back-filled automatically: a register built from guesses is worse
+        # than no register.
+        #
+        # The register table itself is created by create_all() (see
+        # database.py), because it is a table and not a column.
+        "ALTER TABLE products ADD COLUMN register_category TEXT",
     ]
 
     db = SessionLocal()
@@ -1147,6 +1178,12 @@ app.include_router(supplier_credit_router.router, prefix="/api")
 # the receipt both read it), PUT /api/settings/pharmacy (Owner/Admin only).
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(backup_router.router, prefix="/api")
+
+# Schedule H1 / MTP register: which medicines belong in it
+# (/api/regulated/candidates, /apply, /check) and the medicines with no
+# generic name, which are the ones matching can never see
+# (/api/regulated/missing-generic).
+app.include_router(regulated_router.router, prefix="/api")
 
 
 @app.get("/health")

@@ -25,7 +25,9 @@ from sqlalchemy.orm import Session
 from app.models.billing import AuditLog, Invoice, InvoiceItem
 from app.models.inventory import Batch, Product, StockMovement
 from app.models.patients import Patient
+from app.models.user import User
 from app.schemas.billing import CreateInvoiceRequest
+from app.services import costing, regulated_register
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +214,11 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
                 product_id=batch.product_id,
                 quantity=qty,
                 unit_price=unit_price,
-                purchase_price=batch.purchase_price,  # for profit calculation
+                # The SAME cost the batch panel shows, so a sale's reported
+                # profit matches the margin the pharmacist was promised when
+                # the stock was booked in.  Snapshotted here and never read
+                # again, so past invoices keep whatever was true on the day.
+                purchase_price=costing.unit_cost(batch) or batch.purchase_price,
                 gst_rate=gst_rate,
                 line_total=line_total,
             )
@@ -260,6 +266,33 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
     credit_amount = (total_amount - amount_paid) if is_credit else Decimal("0")
 
     # --- Create the invoice header --------------------------------------------
+    # --- The register gate -------------------------------------------------
+    # Before anything is written: if this bill contains a Schedule H1 medicine
+    # or an MTP kit, the register has to be writable, and it cannot be written
+    # without the patient's and the prescriber's details.
+    #
+    # Checked HERE, before the invoice row exists, so a refusal leaves nothing
+    # behind.  The counter is also the only moment this information exists —
+    # afterwards the customer has gone and the register gets filled in from
+    # memory, which is how registers end up saying "walk-in".
+    regulated = regulated_register.regulated_lines(db, pending_items)
+    if regulated:
+        patient = (
+            db.query(Patient).filter(Patient.id == data.patient_id).first()
+            if data.patient_id else None
+        )
+        try:
+            regulated_register.check_details(
+                regulated,
+                patient,
+                data.referred_by,
+                getattr(data, "referred_by_address", None),
+            )
+        except regulated_register.RegisterDetailsMissing as exc:
+            # 400, not 500: the pharmacist can fix this, and the message names
+            # both what is missing and which medicine demanded it.
+            raise HTTPException(status_code=400, detail=str(exc))
+
     invoice = Invoice(
         invoice_number=invoice_number,
         patient_id=data.patient_id,
@@ -279,6 +312,24 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
     )
     db.add(invoice)
     db.flush()   # assigns invoice.id so we can link the items below
+
+    # --- The register rows ---------------------------------------------------
+    # After the flush, so the invoice number and id are real; inside the same
+    # transaction, so a sale that rolls back takes its register entry with it.
+    # A register must never claim a sale that did not happen.
+    if regulated:
+        dispenser = db.query(User).filter(User.id == user_id).first() if user_id else None
+        regulated_register.write_rows(
+            db,
+            regulated,
+            invoice            = invoice,
+            patient            = patient,
+            prescriber_name    = data.referred_by,
+            prescriber_address = getattr(data, "referred_by_address", None),
+            dispensed_by_id    = user_id,
+            dispensed_by_name  = getattr(dispenser, "full_name", None)
+                                 or getattr(dispenser, "username", None),
+        )
 
     # --- Link items to this invoice -------------------------------------------
     for item in pending_items:

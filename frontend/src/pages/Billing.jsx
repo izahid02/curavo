@@ -31,6 +31,17 @@ function inr(amount) {
   });
 }
 
+/**
+ * Round to paise.  JS floats drift (0.1 + 0.2 !== 0.3), so every money step
+ * rounds explicitly rather than hoping the display hides it.
+ *
+ * HALF-UP for positive amounts, matching the backend's ROUND_HALF_UP, so the
+ * screen and the stored invoice land on the same paisa.
+ */
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 /** Format a date (or ISO date string) as "10 Jan 2025" in IST. '' if empty. */
 function fmtDate(d) {
   if (!d) return '';
@@ -62,9 +73,20 @@ function nextDueDate(credit) {
  *   taxable = total − gst
  */
 function lineCalc(item) {
-  const total = item.qty * item.unit_price;
-  const gst = total * item.gst_rate / (100 + item.gst_rate);
-  const taxable = total - gst;
+  // ROUND EACH LINE TO PAISE, in the same order the server does it.
+  //
+  // Per-unit prices carry FOUR decimals, because a Rs.100 strip of 15 tablets
+  // is Rs.6.6667 a tablet and nothing else divides cleanly.  So the raw
+  // multiplication here lands on Rs.100.0005 for one strip, and an unrounded
+  // bill would show a total a fraction of a paisa away from the invoice the
+  // server stores -- the same screen-versus-server mismatch, one tier smaller.
+  //
+  // billing_service quantizes the line total FIRST and then extracts GST from
+  // that rounded figure, so this does the two steps in that order too.  Do not
+  // reorder them: GST taken from the unrounded total can differ by a paisa.
+  const total = round2(item.qty * item.unit_price);
+  const gst = round2(total * item.gst_rate / (100 + item.gst_rate));
+  const taxable = round2(total - gst);
   return { taxable, gst, total };
 }
 
@@ -131,6 +153,10 @@ export default function Billing() {
   const [isPrescription, setIsPrescription] = useState(false);
   const [referredBy, setReferredBy] = useState('');
   const [referredByAutoFilled, setReferredByAutoFilled] = useState(false);
+  // The prescriber's ADDRESS.  The Schedule H1 register asks for "name and
+  // address of the prescriber", not the name alone, so a bill containing a
+  // regulated medicine cannot be completed without it.
+  const [referredByAddress, setReferredByAddress] = useState('');
   const [availableTags, setAvailableTags] = useState([]);
   const [departments, setDepartments] = useState([]);
   // Short-lived green confirmation message in the bottom-right corner
@@ -142,9 +168,11 @@ export default function Billing() {
   const [patientCredit, setPatientCredit] = useState(null);
 
   // Prescription upload state
-  // prescriptionFile holds the File object until the invoice is saved;
-  // after saving we upload it with the real invoice_id and reset to null.
-  const [prescriptionFile, setPrescriptionFile] = useState(null);
+  // prescriptionFiles holds the chosen PAGES, in order, until the invoice is
+  // saved; after saving each one is uploaded with the real invoice_id and the
+  // list is reset.  A prescription is routinely two or three sheets, so this
+  // is a list rather than a single file.
+  const [prescriptionFiles, setPrescriptionFiles] = useState([]);
   // historyPatient = { id, name } for the Patient History panel on the right.
   // It is separate from selectedPatient so the pharmacist can close the panel
   // (× button) without unlinking the patient from the bill.
@@ -319,6 +347,8 @@ export default function Billing() {
         strip_mrp:       isStrip ? stripMrp : null,
         unit_mrp:        isStrip ? unitMrp  : null,
         sell_mode:       isStrip ? 'strip' : 'unit',
+        // 'H1' | 'MTP' | null — drives the register warning on this screen.
+        register_category: product.register_category || null,
       }];
     });
   }
@@ -428,7 +458,7 @@ export default function Billing() {
     setShowAddForm(false);
     // Switching patients must not carry the previous patient's prescription
     // image over to the new one.
-    setPrescriptionFile(null);
+    setPrescriptionFiles([]);
     // Auto-set prescription toggle based on patient type
     if (patient.patient_type === 'PRESCRIPTION') {
       setIsPrescription(true);
@@ -466,7 +496,7 @@ export default function Billing() {
     setReferredByAutoFilled(false);
     setPatientSearch('');
     setPatientResults([]);
-    setPrescriptionFile(null);
+    setPrescriptionFiles([]);
     setPatientCredit(null);
   }
 
@@ -489,6 +519,21 @@ export default function Billing() {
   }, []);
 
   // ── Compute bill totals ─────────────────────────────────────────────────────
+  /**
+   * Does this bill need a register entry?
+   *
+   * True as soon as one Schedule H1 medicine or MTP kit is on it.  Used to
+   * warn the pharmacist WHILE they build the bill, rather than letting them
+   * reach the end and be refused — the customer is still standing there at
+   * that point, which is the only moment the details can be collected.
+   *
+   * The server enforces this regardless; this is courtesy, not security.
+   */
+  const needsRegister = useMemo(
+    () => bill.some((i) => i.register_category),
+    [bill],
+  );
+
   const totals = useMemo(() => {
     let subtotal = 0, gstTotal = 0, mrpTotal = 0;
     for (const item of bill) {
@@ -626,6 +671,7 @@ export default function Billing() {
         // percentage, so a 10% bill and a ₹10 bill store identically.
         discount_amount: parseFloat(totals.discountAmount) || 0,
         referred_by: isPrescription && referredBy.trim() ? referredBy.trim() : null,
+        referred_by_address: referredByAddress.trim() || null,
         amount_paid: paymentMethod === 'CREDIT' ? (parseFloat(amountPaidToday) || 0) : undefined,
         credit_due_date: effectiveDueDate,
         // Home visit / drip service charge (Feature 4) — no GST applies.
@@ -637,28 +683,57 @@ export default function Billing() {
 
       // Upload prescription silently after the bill is saved, now that we
       // have the real invoice_id to link it to.
-      if (prescriptionFile && selectedPatient?.id) {
-        try {
-          const form = new FormData();
-          form.append('file',        prescriptionFile);
-          form.append('patient_id',  selectedPatient.id);
-          form.append('invoice_id',  savedInvoice.id);
-          await api.post('/prescriptions/upload', form, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-        } catch {
-          // Bill is already saved; warn but don't fail the whole flow
-          setUploadWarning('Bill saved but prescription upload failed — please try again from Patient History.');
-        } finally {
-          setPrescriptionFile(null);
+      if (prescriptionFiles.length > 0 && selectedPatient?.id) {
+        // One row per PAGE, uploaded in order, each carrying its position in
+        // its notes.  The prescriptions table already allowed many rows per
+        // invoice, so a three-page prescription needs no schema change — only
+        // three uploads instead of one.
+        //
+        // Sequential, not Promise.all: the pages must land in order, and ten
+        // simultaneous multipart posts to a local server is a worse bet than
+        // ten quick ones.
+        const total = prescriptionFiles.length;
+        // One id shared by every page of THIS upload — it is the only thing
+        // that later ties the sheets back together as one prescription.
+        // Not the invoice id: a patient can legitimately have two separate
+        // prescriptions against one bill, and a prescription can be uploaded
+        // before any bill exists.
+        const groupId = (crypto?.randomUUID?.() ?? `rx-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        let failed = 0;
+        for (let i = 0; i < total; i += 1) {
+          try {
+            const form = new FormData();
+            form.append('file',        prescriptionFiles[i]);
+            form.append('patient_id',  selectedPatient.id);
+            form.append('invoice_id',  savedInvoice.id);
+            form.append('group_id',    groupId);
+            form.append('page_number', String(i + 1));
+            form.append('notes',       `Page ${i + 1} of ${total}`);
+            await api.post('/prescriptions/upload', form, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+          } catch {
+            failed += 1;
+          }
         }
+        // The bill is already saved, so a failed page is a warning, never an
+        // error — and it says HOW MANY failed, because "some pages are
+        // missing" is a different problem from "nothing uploaded".
+        if (failed > 0) {
+          setUploadWarning(
+            failed === total
+              ? 'Bill saved, but the prescription did not upload — please add it again from Patient History.'
+              : `Bill saved, but ${failed} of ${total} prescription pages did not upload — please add them again from Patient History.`
+          );
+        }
+        setPrescriptionFiles([]);
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to create invoice. Please try again.');
     } finally {
       setCompleting(false);
     }
-  }, [bill, completing, selectedPatient, paymentMethod, discount, isPrescription, referredBy, prescriptionFile, amountPaidToday, creditDueDate, totals]);
+  }, [bill, completing, selectedPatient, paymentMethod, discount, isPrescription, referredBy, referredByAddress, prescriptionFiles, amountPaidToday, creditDueDate, totals]);
 
   // Keep the ref up to date so the F10 handler always calls the latest version
   completeSaleRef.current = completeSale;
@@ -714,7 +789,7 @@ export default function Billing() {
     setInteractionDismissed(false);
     setInteractionAcknowledged(false);
     prevBillLengthRef.current = 0;
-    setPrescriptionFile(null);
+    setPrescriptionFiles([]);
     setHistoryPatient(null);
     setUploadWarning('');
     // Small timeout lets the modal unmount before we try to focus
@@ -1467,7 +1542,7 @@ export default function Billing() {
                             setReferredByAutoFilled(false);
                             // Switching back to "No" drops any image already
                             // picked, so a hidden file can't be uploaded on save.
-                            setPrescriptionFile(null);
+                            setPrescriptionFiles([]);
                           }
                         }}
                       />
@@ -1476,8 +1551,31 @@ export default function Billing() {
                   ))}
                 </div>
 
-                {/* Doctor name — only when prescription = Yes */}
-                {isPrescription && (
+                {/* THE REGISTER WARNING.
+                    Shown the moment a regulated medicine lands on the bill,
+                    not at the end — the customer is still at the counter now,
+                    and these details can only be collected while they are. */}
+                {needsRegister && (
+                  <div style={{
+                    marginTop: 8, padding: '10px 12px', borderRadius: 10,
+                    background: 'rgba(245,158,11,0.10)',
+                    border: '1px solid rgba(245,158,11,0.34)',
+                    fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)',
+                  }}>
+                    <strong style={{ color: 'var(--warn)' }}>
+                      This sale goes into the register.
+                    </strong>{' '}
+                    {bill.filter((i) => i.register_category).map((i) => i.name).join(', ')}
+                    {' '}must be recorded, so the bill needs the patient's name,
+                    phone and address, and the doctor's name and address.
+                  </div>
+                )}
+
+                {/* Doctor name — shown when this is a prescription sale, AND
+                    whenever the register needs it.  Without the second case a
+                    regulated sale with "Prescription? No" would be refused by
+                    the server with nowhere on screen to type the answer. */}
+                {(isPrescription || needsRegister) && (
                   <div style={{ marginTop: 8 }}>
                     <input
                       placeholder="Doctor name (referred by)"
@@ -1490,6 +1588,22 @@ export default function Billing() {
                         ✓ Auto-filled from last OPD visit
                       </div>
                     )}
+                    {/* The doctor's address.  Shown always (it belongs with
+                        the name) but only REQUIRED when a regulated medicine
+                        is on the bill — the server enforces that, and the
+                        banner below says so before the pharmacist gets there. */}
+                    <input
+                      placeholder={needsRegister
+                        ? "Doctor's address (required for the register)"
+                        : "Doctor's address (optional)"}
+                      value={referredByAddress}
+                      onChange={(e) => setReferredByAddress(e.target.value)}
+                      style={{
+                        fontSize: 13, width: '100%', marginTop: 6,
+                        borderColor: needsRegister && !referredByAddress.trim()
+                          ? 'rgba(245,158,11,0.55)' : undefined,
+                      }}
+                    />
                   </div>
                 )}
 
@@ -1500,7 +1614,7 @@ export default function Billing() {
                   <div style={{ marginTop: 10 }}>
                     <PrescriptionUpload
                       patientId={selectedPatient?.id || null}
-                      onFileSelected={setPrescriptionFile}
+                      onFilesSelected={setPrescriptionFiles}
                       disabled={!selectedPatient}
                     />
                   </div>
