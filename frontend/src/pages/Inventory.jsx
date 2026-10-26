@@ -26,7 +26,7 @@ import MedicineBatchPanel from '../components/inventory/MedicineBatchPanel';
 import { formatDateOnly, getTodayIST } from '../lib/datetime';
 // Money / stock / margin formatting lives in lib so the batch panel shows the
 // exact same figures and margin colours as this page (see inventoryFormat.js).
-import { inr, formatMonthYear, stockLabel, marginTone } from '../lib/inventoryFormat';
+import { inr, formatMonthYear, stockLabel, marginTone, nearestExpiryTone } from '../lib/inventoryFormat';
 
 // ─── Small reusable helpers ────────────────────────────────────────────────
 
@@ -300,6 +300,10 @@ const BLANK_PRODUCT = {
   // Strip / unit management (Feature 3)
   medicine_type: 'TABLET', is_strip: false,
   units_per_strip: '', strip_mrp: '', unit_mrp: '',
+  // Which register this medicine's sale goes into: '' (none), 'H1' or 'MTP'.
+  // Never set by the form on its own -- 'H1' arrives only when the pharmacist
+  // answers the confirmation popup, 'MTP' only when they tick it by hand.
+  register_category: '',
 };
 
 // The dosage forms offered as pill-style toggle buttons.
@@ -340,21 +344,58 @@ function ProductFormModal({ existing, onClose, onSaved }) {
           units_per_strip: existing.units_per_strip != null ? String(existing.units_per_strip) : '',
           strip_mrp:       existing.strip_mrp != null ? String(existing.strip_mrp) : '',
           unit_mrp:        existing.unit_mrp != null ? String(existing.unit_mrp) : '',
+          register_category: existing.register_category ?? '',
         }
       : BLANK_PRODUCT
   );
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
   const [scanningBarcode, setScanningBarcode] = useState(false);
+  // A Schedule H1 match waiting to be confirmed: { payload, match }.
+  // The save is HELD until the pharmacist answers, so the answer is recorded
+  // with the medicine rather than being a separate thing to remember.
+  const [pendingMatch, setPendingMatch] = useState(null);
 
   function set(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  /** The actual write.  Shared by the normal path and the popup's answer. */
+  async function save(payload) {
+    const { data } = isEdit
+      ? await api.put(`/inventory/products/${existing.id}`, payload)
+      : await api.post('/inventory/products', payload);
+    onSaved(data, isEdit);
+    onClose();
+  }
+
+  /** The pharmacist answered the Schedule H1 popup. */
+  async function answerMatch(flagIt) {
+    const { payload } = pendingMatch;
+    setPendingMatch(null);
+    setLoading(true);
+    try {
+      await save({ ...payload, register_category: flagIt ? 'H1' : null });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not save this medicine.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     if (!form.name.trim())  return setError('Medicine Name is required.');
+    // Generic name and brand are REQUIRED, and this is why: Schedule H1 names
+    // drugs, not brands, so the register match reads the generic name.  A
+    // medicine saved without one can never be matched, however regulated it
+    // is -- it simply never appears.  205 medicines already in this pharmacy
+    // are in that state; this stops the list growing.
+    if (!form.generic_name.trim()) {
+      return setError('Generic name is required — the Schedule H1 check reads it, and a medicine without one can never be flagged.');
+    }
+    if (!form.brand.trim()) return setError('Brand is required.');
     if (!form.gst_rate)     return setError('GST Rate is required.');
 
     setLoading(true);
@@ -376,12 +417,33 @@ function ProductFormModal({ existing, onClose, onSaved }) {
         units_per_strip: stripMedicine && form.units_per_strip ? Number(form.units_per_strip) : null,
         strip_mrp:       stripMedicine && form.strip_mrp       ? Number(form.strip_mrp)       : null,
         unit_mrp:        stripMedicine && form.unit_mrp        ? Number(form.unit_mrp)        : null,
+        // '' is the form's way of saying "not regulated"; the backend wants null.
+        register_category: form.register_category || null,
       };
-      const { data } = isEdit
-        ? await api.put(`/inventory/products/${existing.id}`, payload)
-        : await api.post('/inventory/products', payload);
-      onSaved(data, isEdit);
-      onClose();
+      // Does this look like a Schedule H1 drug?  Asked HERE, at the moment of
+      // typing, because that is when the pharmacist still remembers what they
+      // meant -- and because a popup that does NOT appear for a drug they know
+      // is Schedule H1 tells them the generic name they typed is wrong.
+      if (!payload.register_category) {
+        try {
+          const { data: hit } = await api.post('/regulated/check', {
+            name: payload.name, generic_name: payload.generic_name,
+          });
+          if (hit?.matched) {
+            // Hold the save.  The answer is saved WITH the medicine, so it can
+            // never be answered and then lost.
+            setPendingMatch({ payload, match: hit });
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // The check is an assistant, not a gate: if it cannot be reached the
+          // medicine still saves, unflagged, and the review screen will catch
+          // it later.
+        }
+      }
+
+      await save(payload);
     } catch (err) {
       setError(err.response?.data?.detail || `Could not ${isEdit ? 'update' : 'create'} product.`);
     } finally {
@@ -583,6 +645,59 @@ function ProductFormModal({ existing, onClose, onSaved }) {
           </div>
         )}
 
+        {/* MTP kit — ticked by hand, because "MTP kit" is not a molecule on
+            any list and no drug-name match can find it. */}
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+          padding: '11px 14px', marginBottom: 14, borderRadius: 10,
+          background: form.register_category === 'MTP' ? 'rgba(244,63,94,0.07)' : 'rgba(0,0,0,0.03)',
+          border: form.register_category === 'MTP'
+            ? '1px solid rgba(244,63,94,0.30)' : '1px solid rgba(0,0,0,0.08)',
+        }}>
+          <input
+            type="checkbox"
+            checked={form.register_category === 'MTP'}
+            onChange={(e) => set('register_category', e.target.checked ? 'MTP' : '')}
+            style={{ width: 'auto', margin: 0 }}
+          />
+          <span style={{ fontSize: 13 }}>
+            <strong>This is an MTP kit</strong>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
+              — every sale goes in the register, and the counter will ask for the
+              patient's name, phone, address and the doctor's details.
+            </span>
+          </span>
+        </label>
+
+        {/* Already flagged as Schedule H1 (from the popup, or the review
+            screen).  Shown so it is visible and reversible, not hidden. */}
+        {form.register_category === 'H1' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
+            padding: '11px 14px', borderRadius: 10,
+            background: 'rgba(245,158,11,0.09)', border: '1px solid rgba(245,158,11,0.32)',
+            fontSize: 13,
+          }}>
+            <span style={{ flex: 1 }}>
+              <strong>Schedule H1</strong>
+              <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
+                — every sale is written into the register.
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => set('register_category', '')}
+              style={{
+                background: 'transparent', border: '1px solid rgba(0,0,0,0.15)',
+                borderRadius: 7, padding: '4px 9px', fontSize: 12, cursor: 'pointer',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        )}
+
         {error && (
           <p style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 12 }}>{error}</p>
         )}
@@ -594,6 +709,50 @@ function ProductFormModal({ existing, onClose, onSaved }) {
           </button>
         </div>
       </form>
+
+      {/* THE CONFIRMATION.
+          The match is a proposal, never a verdict: it names the drug it found
+          so the pharmacist is agreeing with a fact rather than trusting the
+          machine.  The save is held open behind this, so the answer is stored
+          with the medicine and cannot be given and then lost. */}
+      {pendingMatch && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1200,
+          background: 'rgba(15,23,42,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 12, padding: 22,
+            width: 'min(460px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,0.25)',
+          }}>
+            <h3 style={{ margin: '0 0 10px', fontSize: 17 }}>
+              {pendingMatch.match.label}
+            </h3>
+            <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              <strong>{form.name || 'This medicine'}</strong> has a generic name of{' '}
+              <strong>{form.generic_name}</strong>, which contains{' '}
+              <strong>{pendingMatch.match.matched_drug}</strong>.
+            </p>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              Marking it means every sale is written into the Schedule H1 register,
+              and the counter will not complete a bill containing it until the
+              patient's name, phone and address and the doctor's name and address
+              have been entered.
+            </p>
+            <p style={{ margin: '0 0 18px', fontSize: 11.5, color: 'var(--text-hint)', fontFamily: 'monospace' }}>
+              {pendingMatch.match.notification}
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn-secondary" onClick={() => answerMatch(false)}>
+                No, save without
+              </button>
+              <button type="button" className="btn-primary" onClick={() => answerMatch(true)}>
+                Yes, mark it Schedule H1
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -1636,6 +1795,419 @@ function AddStockPanel({ product, suppliers, onClose, onAdded }) {
 
 // ─── Tab 1: Products ───────────────────────────────────────────────────────
 
+/** Small badge marking a medicine whose sale goes into a register. */
+function RegisterBadge({ category }) {
+  const h1 = category === 'H1';
+  return (
+    <span
+      title={h1
+        ? 'Schedule H1 — every sale is written into the register'
+        : 'MTP kit — every sale is written into the register'}
+      style={{
+        marginLeft: 7, fontSize: 9.5, fontWeight: 800, letterSpacing: 0.3,
+        padding: '2px 5px', borderRadius: 4, verticalAlign: 'middle',
+        background: h1 ? 'rgba(245,158,11,0.14)' : 'rgba(244,63,94,0.12)',
+        color:      h1 ? 'var(--warn)'           : 'var(--danger)',
+        border: h1 ? '1px solid rgba(245,158,11,0.34)' : '1px solid rgba(244,63,94,0.30)',
+      }}
+    >
+      {h1 ? 'H1' : 'MTP'}
+    </span>
+  );
+}
+
+/**
+ * "Register check" — confirm which medicines belong in the Schedule H1
+ * register.
+ *
+ * The backend PROPOSES, naming the drug it found and the notification it
+ * comes from.  Nothing is applied until the pharmacist says so, because an
+ * inspector reads this register as a statement of fact and a flag nobody
+ * looked at is a guess wearing a uniform.
+ */
+function RegulatedReviewModal({ onClose, onApplied, onFillGaps }) {
+  const [data, setData]       = useState(null);
+  const [choices, setChoices] = useState({});   // product_id -> 'H1' | 'MTP' | ''
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState('');
+  const [showDecided, setShowDecided] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get(`/regulated/candidates?include_decided=${showDecided}`)
+      .then(({ data: d }) => {
+        setData(d);
+        // Pre-select what the matcher suggests, so confirming a shelf's worth
+        // is one click -- but every row can still be changed or cleared.
+        const next = {};
+        for (const c of d.items) next[c.product_id] = c.register_category || c.suggested || '';
+        setChoices(next);
+      })
+      .catch((err) => setError(err.response?.data?.detail || 'Could not load the check.'))
+      .finally(() => setLoading(false));
+  }, [showDecided]);
+
+  async function apply() {
+    if (!data) return;
+    setSaving(true);
+    setError('');
+    try {
+      const decisions = data.items.map((c) => ({
+        product_id: c.product_id,
+        category:   choices[c.product_id] || null,
+      }));
+      const { data: res } = await api.post('/regulated/apply', { decisions });
+      onApplied(`${res.updated} medicine${res.updated === 1 ? '' : 's'} updated.`);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not save those decisions.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const CELL = { padding: '9px 10px', borderBottom: '1px solid var(--border)', fontSize: 13 };
+
+  return (
+    <div
+      onClick={() => !saving && onClose()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1150,
+        background: 'rgba(15,23,42,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 12, padding: 20,
+          width: 'min(820px, 100%)', maxHeight: '86vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.25)',
+        }}
+      >
+        <h3 style={{ margin: '0 0 4px', fontSize: 18 }}>Register check</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          Medicines whose generic name contains a Schedule H1 drug. Confirm the
+          ones that belong in the register — a sale of these cannot be completed
+          without the patient's and the doctor's details.
+        </p>
+
+        {loading ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Checking the shelf…</p>
+        ) : !data ? null : (
+          <>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                {data.drugs_in_force} drugs on Schedule H1 today · {data.total} medicine
+                {data.total === 1 ? '' : 's'} to review
+              </span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={showDecided}
+                  onChange={(e) => setShowDecided(e.target.checked)}
+                  style={{ width: 'auto', margin: 0 }}
+                />
+                Include ones already decided
+              </label>
+            </div>
+
+            {/* The hole in the register, stated out loud rather than left to
+                be discovered one sale at a time. */}
+            {data.unmatchable > 0 && (
+              <p style={{
+                margin: '0 0 12px', fontSize: 12.5, lineHeight: 1.5,
+                color: 'var(--danger)', background: 'var(--danger-bg)',
+                border: '1px solid rgba(244,63,94,0.25)', borderRadius: 8, padding: '9px 11px',
+              }}>
+                <strong>{data.unmatchable} medicines have no generic name.</strong>{' '}
+                Schedule H1 names drugs, so this check has nothing to read for
+                them — any regulated medicine among them will never appear in
+                this list. They need filling in.
+                {onFillGaps && (
+                  <>
+                    {' '}
+                    <button
+                      onClick={onFillGaps}
+                      style={{
+                        background: 'transparent', border: 'none', padding: 0,
+                        font: 'inherit', fontWeight: 700, color: 'var(--danger)',
+                        textDecoration: 'underline', cursor: 'pointer',
+                      }}
+                    >
+                      Fill them in now
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {data.items.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '18px 0', lineHeight: 1.6 }}>
+                  {showDecided
+                    ? 'No medicine on the shelf matches a Schedule H1 drug.'
+                    : 'Nothing left to review — anything that matched has already been decided. Tick “Include ones already decided” above to see it and change your mind.'}
+                </p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg)' }}>
+                      {['Medicine', 'Generic name', 'Found', 'Register as'].map((h) => (
+                        <th key={h} style={{ ...CELL, textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11.5 }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.items.map((c) => (
+                      <tr key={c.product_id}>
+                        <td style={{ ...CELL, fontWeight: 600 }}>{c.name}</td>
+                        <td style={{ ...CELL, color: 'var(--text-secondary)' }}>{c.generic_name || '—'}</td>
+                        <td style={CELL}>
+                          {c.matched_drug ? (
+                            <>
+                              <div style={{ textTransform: 'capitalize' }}>{c.matched_drug}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-hint)', fontFamily: 'monospace' }}>
+                                {c.notification}
+                              </div>
+                            </>
+                          ) : (
+                            <span style={{ color: 'var(--text-hint)' }}>set by hand</span>
+                          )}
+                        </td>
+                        <td style={CELL}>
+                          <select
+                            value={choices[c.product_id] ?? ''}
+                            onChange={(e) => setChoices((p) => ({ ...p, [c.product_id]: e.target.value }))}
+                            style={{ fontSize: 12.5, padding: '4px 6px' }}
+                          >
+                            <option value="">Not regulated</option>
+                            <option value="H1">Schedule H1</option>
+                            <option value="MTP">MTP kit</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+
+        {error && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10 }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={apply}
+            disabled={saving || loading || !data || data.items.length === 0}
+          >
+            {saving ? 'Saving…' : 'Confirm'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Fill in generic names" — the hole in the register, closed.
+ *
+ * Schedule H1 names drugs, the register check reads the generic name, and a
+ * medicine with none is invisible to it however regulated it actually is.
+ * This pharmacy has 205 such medicines.  Rather than discovering them one
+ * sale at a time, they are listed here and filled in once.
+ *
+ * Saving re-checks each one straight away and says which of them turn out to
+ * be Schedule H1 — that answer is the whole reason for the exercise, and it
+ * should not wait to be noticed.
+ */
+function MissingGenericModal({ onClose, onSaved }) {
+  const [rows, setRows]       = useState(null);
+  const [values, setValues]   = useState({});   // product_id -> typed name
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState('');
+  const [filter, setFilter]   = useState('');
+  const [matched, setMatched] = useState(null); // what turned out regulated
+
+  useEffect(() => {
+    setLoading(true);
+    api.get('/regulated/missing-generic')
+      .then(({ data }) => setRows(data))
+      .catch((err) => setError(err.response?.data?.detail || 'Could not load the list.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filled = Object.entries(values).filter(([, v]) => v && v.trim());
+
+  async function save() {
+    if (filled.length === 0) return;
+    setSaving(true);
+    setError('');
+    try {
+      const { data } = await api.post('/regulated/fill-generic', {
+        fills: filled.map(([id, v]) => ({ product_id: Number(id), generic_name: v.trim() })),
+      });
+      // Drop the saved ones from the list so the remaining work is what is left.
+      const done = new Set(filled.map(([id]) => Number(id)));
+      setRows((prev) => (prev || []).filter((r) => !done.has(r.product_id)));
+      setValues({});
+      if (data.now_matching?.length) {
+        // Stop and say so: these are the ones that were invisible.
+        setMatched(data.now_matching);
+      } else {
+        onSaved(`${data.saved} generic name${data.saved === 1 ? '' : 's'} saved.`);
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not save those names.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const visible = (rows || []).filter((r) =>
+    !filter.trim() || r.name.toLowerCase().includes(filter.trim().toLowerCase()));
+
+  const CELL = { padding: '7px 10px', borderBottom: '1px solid var(--border)', fontSize: 13 };
+
+  return (
+    <div
+      onClick={() => !saving && onClose()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1160,
+        background: 'rgba(15,23,42,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 12, padding: 20,
+          width: 'min(760px, 100%)', maxHeight: '88vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.25)',
+        }}
+      >
+        <h3 style={{ margin: '0 0 4px', fontSize: 18 }}>Medicines with no generic name</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+          The register check reads the generic name, so these medicines can never
+          appear in it — including any that really are Schedule H1. Fill in what
+          you know; you do not have to do them all at once.
+        </p>
+
+        {/* What the filling turned up.  Shown instead of the list, because it
+            is the answer the whole screen exists to produce. */}
+        {matched ? (
+          <>
+            <div style={{
+              padding: '12px 14px', borderRadius: 10, marginBottom: 12,
+              background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.34)',
+              fontSize: 13.5, lineHeight: 1.55,
+            }}>
+              <strong style={{ color: 'var(--warn)' }}>
+                {matched.length} of those turned out to be Schedule H1.
+              </strong>{' '}
+              They were invisible to the register check until now. Open
+              “Register check” to confirm them.
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  {matched.map((m) => (
+                    <tr key={m.product_id}>
+                      <td style={{ ...CELL, fontWeight: 600 }}>{m.name}</td>
+                      <td style={{ ...CELL, color: 'var(--text-secondary)' }}>{m.generic_name}</td>
+                      <td style={{ ...CELL, textTransform: 'capitalize' }}>{m.matched_drug}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : loading ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Find a medicine…"
+                style={{ fontSize: 13, maxWidth: 260 }}
+              />
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                {(rows || []).length} left · {filled.length} filled in
+              </span>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {visible.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '18px 0' }}>
+                  {(rows || []).length === 0
+                    ? 'Every medicine has a generic name. Nothing can hide from the register check.'
+                    : 'No medicine matches that search.'}
+                </p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg)' }}>
+                      {['Medicine', 'Brand', 'Generic name'].map((h) => (
+                        <th key={h} style={{ ...CELL, textAlign: 'left', fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((r) => (
+                      <tr key={r.product_id}>
+                        <td style={{ ...CELL, fontWeight: 600 }}>{r.name}</td>
+                        <td style={{ ...CELL, color: 'var(--text-muted)' }}>{r.brand || '—'}</td>
+                        <td style={{ ...CELL, width: '42%' }}>
+                          <input
+                            value={values[r.product_id] ?? ''}
+                            onChange={(e) => setValues((p) => ({ ...p, [r.product_id]: e.target.value }))}
+                            placeholder="e.g. Levofloxacin 500 MG"
+                            style={{ fontSize: 12.5, padding: '4px 7px', width: '100%' }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+
+        {error && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10 }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>
+            {matched ? 'Close' : 'Done for now'}
+          </button>
+          {!matched && (
+            <button
+              className="btn-primary"
+              onClick={save}
+              disabled={saving || loading || filled.length === 0}
+            >
+              {saving ? 'Saving…' : `Save ${filled.length || ''}`.trim()}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProductsTab({ suppliers, showToast }) {
   const [products, setProducts]           = useState([]);
   const [total, setTotal]                 = useState(0);
@@ -1653,6 +2225,15 @@ function ProductsTab({ suppliers, showToast }) {
   // the popover appears next to the row the pharmacist is already looking at
   // instead of flying in from the edge of the screen.
   const [popoverPos, setPopoverPos] = useState(null);
+  // Deleting a medicine is soft, so a mistake has to be findable again.  This
+  // toggle is the only way back to a deleted row; without it the delete button
+  // would be a one-way door.
+  const [showDeleted, setShowDeleted] = useState(false);
+  // The medicine awaiting a delete confirmation (null = no dialog open).
+  const [deleting, setDeleting] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [showRegulated, setShowRegulated] = useState(false);
+  const [showGaps, setShowGaps] = useState(false);
   const limit = 20;
 
   // Debounce search: wait 300ms after typing stops before hitting the API
@@ -1668,11 +2249,12 @@ function ProductsTab({ suppliers, showToast }) {
     setLoading(true);
     const params = new URLSearchParams({ page, limit });
     if (debouncedSearch) params.set('search', debouncedSearch);
+    if (showDeleted) params.set('include_deleted', 'true');
     api.get(`/inventory/products?${params}`)
       .then(({ data }) => { setProducts(data.items); setTotal(data.total); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, page, showDeleted]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
@@ -1779,6 +2361,40 @@ function ProductsTab({ suppliers, showToast }) {
     showToast(message);
   }
 
+  /**
+   * Delete a medicine - SOFT, always.
+   *
+   * The row stays in the database because every past invoice points at it; it
+   * simply stops appearing in this list, in search and in billing.  An old
+   * bill from before the deletion still prints the medicine's name, which is
+   * the whole reason this is not a real delete.
+   */
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    try {
+      await api.delete(`/inventory/products/${deleting.id}`);
+      showToast(`${deleting.name} deleted. Past invoices are unaffected.`);
+      setDeleting(null);
+      fetchProducts();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Could not delete this medicine.');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  /** Undo a soft delete.  is_active is an ordinary updatable field. */
+  async function restoreProduct(p) {
+    try {
+      await api.put(`/inventory/products/${p.id}`, { is_active: true });
+      showToast(`${p.name} restored.`);
+      fetchProducts();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Could not restore this medicine.');
+    }
+  }
+
   const totalPages = Math.ceil(total / limit);
 
   return (
@@ -1791,6 +2407,26 @@ function ProductsTab({ suppliers, showToast }) {
           placeholder="Search by name, generic name, or barcode…"
           style={{ maxWidth: 380 }}
         />
+        {/* The only route back to a deleted medicine. */}
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap',
+        }}>
+          <input
+            type="checkbox"
+            checked={showDeleted}
+            onChange={(e) => { setShowDeleted(e.target.checked); setPage(1); }}
+            style={{ width: 'auto', margin: 0 }}
+          />
+          Show deleted
+        </label>
+        <button
+          className="btn-secondary"
+          onClick={() => setShowRegulated(true)}
+          title="Check which medicines belong in the Schedule H1 register"
+        >
+          Register check
+        </button>
         <div style={{ marginLeft: 'auto' }}>
           <button className="btn-primary" onClick={() => setShowAddModal(true)}>
             + Add New Medicine
@@ -1810,7 +2446,7 @@ function ProductsTab({ suppliers, showToast }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ background: 'var(--bg)' }}>
-                {['Name', 'Generic Name', 'Barcode', 'Stock', 'Min Stock', 'GST%', 'Status', 'Actions'].map((h) => (
+                {['Name', 'Generic Name', 'Expiry', 'Stock', 'Min Stock', 'GST%', 'Status', 'Actions'].map((h) => (
                   <th key={h} style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -1824,8 +2460,20 @@ function ProductsTab({ suppliers, showToast }) {
                 // The low-stock comparison above stays in UNITS — min_stock_level
                 // is stored in units, so comparing strips to it would be wrong.
                 const stock = stockLabel(p.current_stock, p.is_strip, p.units_per_strip);
+                // Earliest expiry among batches that still have stock.  Null
+                // when nothing is on hand — there is nothing to expire, and an
+                // old date from a sold-out batch would read as a false alarm.
+                const expiry = nearestExpiryTone(p.nearest_expiry);
                 return (
-                  <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <tr
+                    key={p.id}
+                    style={{
+                      borderBottom: '1px solid var(--border)',
+                      // A deleted row is only on screen because "Show deleted"
+                      // is on - fade it so it is never mistaken for live stock.
+                      opacity: p.is_active === false ? 0.55 : 1,
+                    }}
+                  >
                     {/* Medicine name → batch popover (expiry, prices, margin).
                         The name is the natural thing to click for "tell me
                         everything about this medicine", and the popover opens
@@ -1838,9 +2486,31 @@ function ProductsTab({ suppliers, showToast }) {
                       >
                         {p.name}
                       </button>
+                      {/* Register badge: the counter will demand full patient
+                          and prescriber details for these, so it is worth
+                          seeing before you get there. */}
+                      {p.register_category && <RegisterBadge category={p.register_category} />}
                     </td>
                     <td style={{ padding: '11px 14px', color: 'var(--text-muted)' }}>{p.generic_name || '—'}</td>
-                    <td style={{ padding: '11px 14px', fontFamily: 'monospace', fontSize: 12 }}>{p.barcode || '—'}</td>
+                    {/* Expiry, not barcode.  A barcode is scanned by the
+                        machine and never read by a person; expiry is what the
+                        pharmacist runs down this list looking for. */}
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                      {p.nearest_expiry ? (
+                        <>
+                          <div style={{ fontWeight: 600, color: expiry.color }}>
+                            {formatMonthYear(p.nearest_expiry)}
+                          </div>
+                          {expiry.note && (
+                            <div style={{ fontSize: 10.5, fontWeight: 600, color: expiry.color, opacity: 0.85 }}>
+                              {expiry.note}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ color: 'var(--text-hint)' }}>—</span>
+                      )}
+                    </td>
                     {/* The stock number opens the SAME popover — the dotted
                         underline was already teaching people to click it, so
                         it keeps working rather than going dead. */}
@@ -1891,6 +2561,31 @@ function ProductsTab({ suppliers, showToast }) {
                         >
                           ✏ Edit
                         </button>
+                        {/* A deleted medicine shows Restore in place of
+                            Delete - the row is only visible at all because
+                            "Show deleted" is on. */}
+                        {p.is_active === false ? (
+                          <button
+                            onClick={() => restoreProduct(p)}
+                            className="btn-secondary"
+                            style={{ padding: '5px 10px', fontSize: 12 }}
+                          >
+                            ↩ Restore
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setDeleting(p)}
+                            title="Remove this medicine from the list. Past invoices keep it."
+                            style={{
+                              padding: '5px 10px', fontSize: 12, fontWeight: 600,
+                              background: 'var(--danger-bg)',
+                              border: '1px solid rgba(244,63,94,0.30)',
+                              borderRadius: 7, color: 'var(--danger)', cursor: 'pointer',
+                            }}
+                          >
+                            🗑 Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1925,6 +2620,81 @@ function ProductsTab({ suppliers, showToast }) {
           onClose={() => setEditProduct(null)}
           onSaved={handleEdited}
         />
+      )}
+
+      {showRegulated && (
+        <RegulatedReviewModal
+          onClose={() => setShowRegulated(false)}
+          onApplied={(msg) => { showToast(msg); fetchProducts(); }}
+          onFillGaps={() => { setShowRegulated(false); setShowGaps(true); }}
+        />
+      )}
+
+      {showGaps && (
+        <MissingGenericModal
+          onClose={() => { setShowGaps(false); fetchProducts(); }}
+          onSaved={(msg) => { showToast(msg); fetchProducts(); }}
+        />
+      )}
+
+      {/* Delete confirmation.
+          Spells out what "delete" actually means here, because the word
+          promises more destruction than it delivers - and because the one
+          thing the pharmacist will worry about is whether old bills survive. */}
+      {deleting && (
+        <div
+          onClick={() => !deleteBusy && setDeleting(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1100,
+            background: 'rgba(15,23,42,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 12, padding: 22,
+              width: 'min(440px, 100%)', boxShadow: '0 10px 40px rgba(0,0,0,0.25)',
+            }}
+          >
+            <h3 style={{ margin: '0 0 10px', fontSize: 17, color: 'var(--text)' }}>
+              Delete {deleting.name}?
+            </h3>
+            <p style={{ margin: '0 0 10px', fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              It will stop appearing in the medicines list, in search and in billing.
+              <strong> Past invoices keep showing it</strong> - nothing that already
+              happened changes.
+            </p>
+            {deleting.current_stock > 0 && (
+              <p style={{
+                margin: '0 0 10px', fontSize: 13, lineHeight: 1.5,
+                color: 'var(--danger)', background: 'var(--danger-bg)',
+                border: '1px solid rgba(244,63,94,0.25)', borderRadius: 8, padding: '8px 10px',
+              }}>
+                This medicine still has{' '}
+                <strong>
+                  {stockLabel(deleting.current_stock, deleting.is_strip, deleting.units_per_strip).main}
+                </strong>{' '}
+                on the shelf. That stock stays in the database but becomes unsellable.
+              </p>
+            )}
+            <p style={{ margin: '0 0 16px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+              You can bring it back with “Show deleted”.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-secondary"
+                disabled={deleteBusy}
+                onClick={() => setDeleting(null)}
+              >
+                Cancel
+              </button>
+              <button className="btn-danger" disabled={deleteBusy} onClick={confirmDelete}>
+                {deleteBusy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add Stock slide-in panel */}

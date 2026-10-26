@@ -11,6 +11,7 @@ Role access:
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -44,7 +45,7 @@ from app.schemas.inventory import (
     StockMovementOut,
     SupplierReturnListResponse,
 )
-from app.services import supplier_return_service
+from app.services import costing, supplier_return_service
 from app.utils.dates import get_today_ist
 from app.services.auth_service import get_current_user
 from app.services.inventory_service import (
@@ -118,6 +119,7 @@ def _build_product_out(db: Session, product: Product) -> ProductOut:
         unit=product.unit,
         min_stock_level=product.min_stock_level,
         is_active=product.is_active,
+        register_category=product.register_category,
         current_stock=current_stock,
         created_at=product.created_at,
         medicine_type=product.medicine_type or "TABLET",
@@ -186,14 +188,23 @@ def list_products(
     page:   int           = Query(1, ge=1, description="Page number, starts at 1"),
     limit:  int           = Query(20, ge=1, le=100, description="Results per page"),
     search: Optional[str] = Query(None, description="Search name, generic name, or barcode"),
+    include_deleted: bool = Query(False, description="Also list soft-deleted medicines"),
     db:     Session       = Depends(get_db),
     _:      User          = Depends(get_current_user),
 ):
     """
     Return a paginated list of active products.
     Optional 'search' matches name OR generic_name OR barcode (case-insensitive).
+
+    include_deleted exists so a medicine deleted by mistake can be FOUND again.
+    Deleting is soft (is_active = False) precisely because past invoices still
+    point at the row; without a way to list the deleted ones, a slip of the
+    hand would be unrecoverable from the app.  Off by default, so the ordinary
+    medicines list is unchanged.
     """
-    query = db.query(Product).filter(Product.is_active == True)
+    query = db.query(Product)
+    if not include_deleted:
+        query = query.filter(Product.is_active == True)
 
     if search:
         pattern = f"%{search}%"
@@ -212,12 +223,31 @@ def list_products(
         .all()
     )
 
+    # Earliest expiry per product, for THIS PAGE, in one grouped query.
+    # Only batches with stock left count — an empty batch cannot expire on you.
+    # Done as one query rather than per row: the table re-fetches on every
+    # keystroke in the search box, and 20 extra round trips there is felt.
+    page_ids = [p.id for p in products]
+    nearest_expiry: dict[int, date] = {}
+    if page_ids:
+        nearest_expiry = dict(
+            db.query(Batch.product_id, func.min(Batch.expiry_date))
+            .filter(
+                Batch.product_id.in_(page_ids),
+                Batch.quantity_available > 0,
+            )
+            .group_by(Batch.product_id)
+            .all()
+        )
+
     items = [
         {
             "id":              p.id,
             "name":            p.name,
             "generic_name":    p.generic_name,
             "barcode":         p.barcode,
+            "nearest_expiry":  nearest_expiry.get(p.id),
+            "register_category": p.register_category,
             "current_stock":   get_product_stock(db, p.id),
             "min_stock_level": p.min_stock_level,
             "gst_rate":        p.gst_rate,
@@ -334,6 +364,19 @@ def list_product_batches_detailed(
         for row in rows:
             purchases[row.batch_id] = row
 
+    # Who each batch came from.  Names are fetched for the whole panel in one
+    # query, then looked up per batch — the panel can list a dozen batches and
+    # a per-row lookup would be a dozen extra queries for one column.
+    supplier_ids = {b.supplier_id for b in batches if b.supplier_id}
+    supplier_ids |= {p.supplier_id for p in purchases.values() if p.supplier_id}
+    supplier_names: dict[int, str] = {}
+    if supplier_ids:
+        supplier_names = dict(
+            db.query(Supplier.id, Supplier.name)
+            .filter(Supplier.id.in_(supplier_ids))
+            .all()
+        )
+
     today    = get_today_ist()
     per      = product.units_per_strip if product.is_strip else None
     details  = []
@@ -341,16 +384,16 @@ def list_product_batches_detailed(
     for b in batches:
         purchase = purchases.get(b.id)
 
-        # Cost of one unit, ex-GST.  Prefer the Add Stock record (it is the one
-        # that separates cost from the GST charged on top); fall back to the
-        # batch's own purchase_price for stock that came in through the older
-        # GRN flow.  A zero on both means "never recorded" → None → the panel
-        # shows "—" instead of a fake 100% margin.
-        unit_cost = None
-        if purchase is not None and purchase.cost_price:
-            unit_cost = purchase.cost_price
-        elif b.purchase_price:
-            unit_cost = b.purchase_price
+        # Cost of one unit, ex-GST — the ONE definition, shared with billing
+        # and the reports so the same batch cannot show three margins.
+        #
+        # This used to read stock_purchases.cost_price first, which is the
+        # distributor's RATE CARD: before the trade discount and before the
+        # free units of a scheme.  A 5+1 delivery with 5% off then showed
+        # 18.7% here while Add Stock had just promised 35.7%, and the lower
+        # figure is not conservative — it is wrong, and it makes a profitable
+        # line look marginal.
+        unit_cost = costing.unit_cost(b, purchase)
 
         # strip_mrp is derived from THIS batch's per-unit price, not simply
         # copied from the product — the product field holds only the LATEST
@@ -371,9 +414,19 @@ def list_product_batches_detailed(
                 if abs(product.strip_mrp - strip_mrp) <= tolerance:
                     strip_mrp = product.strip_mrp
 
+        # The Add Stock record is the actual delivery, so it wins.  Stock that
+        # came in through the older GRN flow has no purchase row and falls back
+        # to the supplier recorded on the batch itself.
+        supplier_id = (
+            purchase.supplier_id
+            if purchase is not None and purchase.supplier_id
+            else b.supplier_id
+        )
+
         details.append(ProductBatchDetail(
             batch_id=b.id,
             batch_number=b.batch_number,
+            supplier_name=supplier_names.get(supplier_id) if supplier_id else None,
             quantity_available=b.quantity_available,
             quantity_received=b.quantity_received,
             expiry_date=b.expiry_date,

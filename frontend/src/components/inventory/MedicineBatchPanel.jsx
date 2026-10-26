@@ -438,6 +438,20 @@ export default function MedicineBatchPanel({ product, anchor, onClose, onAddStoc
   };
   // Secondary lines inside a cell (raw units, "n free", days-to-expiry).
   const SUB = { fontSize: 10, color: 'var(--text-hint)', marginTop: 1 };
+  // The Edit column is PINNED to the right edge.
+  //
+  // Eight columns do not fit in 580px, so the table scrolls sideways — and the
+  // edit button, being last, sat permanently off the right edge.  The feature
+  // existed and nobody could reach it.  Sticky keeps it against the edge
+  // whatever the horizontal scroll is doing; the background is opaque so the
+  // Margin column slides underneath it rather than showing through.
+  const STICKY_EDIT = {
+    position: 'sticky', right: 0, zIndex: 1,
+    // Matches the popover's own near-white background, but fully opaque: at
+    // 98% the Margin column would ghost through as it scrolls underneath.
+    background: '#fff',
+    boxShadow: '-6px 0 6px -6px rgba(15,23,42,0.18)',
+  };
 
   // Horizontal clamp: if the popover would spill past the right edge, slide it
   // back left by exactly the overspill.  A transform is used rather than
@@ -538,7 +552,16 @@ export default function MedicineBatchPanel({ product, anchor, onClose, onAddStoc
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {columns.map((h) => <th key={h} style={TH}>{h}</th>)}
+                  {columns.map((h, i) => (
+                    <th
+                      key={h || `actions-${i}`}
+                      style={canEdit && i === columns.length - 1
+                        ? { ...TH, ...STICKY_EDIT }
+                        : TH}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -573,9 +596,21 @@ export default function MedicineBatchPanel({ product, anchor, onClose, onAddStoc
 
                   return (
                     <tr key={b.batch_id}>
-                      {/* Batch number */}
+                      {/* Batch number, with the distributor underneath.
+                          Deliberately NOT its own column: eight already do not
+                          fit in 580px, and "who sold us this box" belongs with
+                          the box's identity rather than off at the far right
+                          where it would need a sideways scroll to read. */}
                       <td style={{ ...TD, fontWeight: 600, fontFamily: 'monospace' }}>
                         {b.batch_number || '—'}
+                        {b.supplier_name && (
+                          <div
+                            style={{ ...SUB, fontFamily: 'inherit', fontWeight: 600, maxWidth: 130 }}
+                            title={b.supplier_name}
+                          >
+                            {b.supplier_name}
+                          </div>
+                        )}
                       </td>
 
                       {/* Scheme, e.g. "5+1" — counted in packs, not tablets */}
@@ -629,6 +664,16 @@ export default function MedicineBatchPanel({ product, anchor, onClose, onAddStoc
                           <>
                             <div>{inr(costPerBasis)}</div>
                             <div style={SUB}>/{basis}</div>
+                            {/* Say so when this is not the invoice rate: a
+                                discount and a scheme both lower what a unit
+                                really cost, and a pharmacist comparing this
+                                against the distributor's bill should not be
+                                left wondering why they differ. */}
+                            {b.scheme_label && (
+                              <div style={{ ...SUB, color: 'var(--ok)' }}>
+                                incl. {b.scheme_label}
+                              </div>
+                            )}
                           </>
                         )}
                       </td>
@@ -655,7 +700,7 @@ export default function MedicineBatchPanel({ product, anchor, onClose, onAddStoc
                       {/* Edit — corrects a mistyped batch, quantity, expiry or
                           price.  Owner/Administrator only. */}
                       {canEdit && (
-                        <td style={{ ...TD, whiteSpace: 'nowrap', textAlign: 'right' }}>
+                        <td style={{ ...TD, ...STICKY_EDIT, whiteSpace: 'nowrap', textAlign: 'right' }}>
                           <button
                             onClick={() => setEditingId(b.batch_id)}
                             title="Edit this batch"

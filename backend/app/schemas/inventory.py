@@ -112,6 +112,9 @@ class ProductCreate(BaseModel):
     rack_location:   Optional[str]  = None
     unit:            Optional[str]  = "unit"
     min_stock_level: int     = Field(default=10, ge=0)
+    # 'H1' | 'MTP' | None — set when the pharmacist confirms the popup that
+    # appears if the generic name matches a Schedule H1 drug.
+    register_category: Optional[str] = None
 
     # --- Strip / unit fields (Feature 3) ------------------------------------
     medicine_type:   MedicineType      = "TABLET"
@@ -155,6 +158,9 @@ class ProductUpdate(BaseModel):
     unit:            Optional[str]     = None
     min_stock_level: Optional[int]     = None
     is_active:       Optional[bool]    = None
+    # 'H1' | 'MTP' | None.  Set from the Add/Edit form once the pharmacist
+    # confirms the popup, or in bulk from the regulated-medicines review.
+    register_category: Optional[str]   = None
 
     # --- Strip / unit fields (Feature 3) ------------------------------------
     medicine_type:   Optional[MedicineType] = None
@@ -198,6 +204,18 @@ class ProductListItem(BaseModel):
     strip_mrp:       Optional[Decimal] = None
     unit_mrp:        Optional[Decimal] = None
 
+    # Which register this medicine's sale goes into: 'H1', 'MTP', or None for
+    # the ordinary medicines that are most of the shelf.  The table shows it
+    # as a badge so the pharmacist can see at a glance what will demand full
+    # patient details at the counter.
+    register_category: Optional[str] = None
+
+    # Earliest expiry among batches that STILL HAVE STOCK.  The medicines table
+    # shows this where the barcode used to sit: a barcode is scanned, never
+    # read, while expiry is the thing a pharmacist scans the list for.
+    # None means no stock on hand, so there is nothing to expire.
+    nearest_expiry:  Optional[date]    = None
+
     model_config = {"from_attributes": True}
 
 
@@ -223,6 +241,7 @@ class ProductOut(BaseModel):
     unit:            Optional[str]
     min_stock_level: int
     is_active:       bool
+    register_category: Optional[str] = None   # 'H1' | 'MTP' | None
     current_stock:   int             # SUM(batch.quantity_available) for non-expired batches
     created_at:      datetime
 
@@ -313,6 +332,10 @@ class ProductBatchDetail(BaseModel):
     """
     batch_id:           int
     batch_number:       Optional[str]
+    # Which distributor this batch came from.  Taken from the Add Stock
+    # purchase record where there is one, else the batch's own supplier.
+    # None for stock old enough to have neither.
+    supplier_name:      Optional[str] = None
     quantity_available: int          # individual units on the shelf right now
     quantity_received:  int          # units when the batch first arrived
     expiry_date:        date
