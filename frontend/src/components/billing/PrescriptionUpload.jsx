@@ -1,20 +1,29 @@
 /**
  * PrescriptionUpload — compact widget inside the Billing page.
  *
- * Lifecycle:
- *   1. Collapsed: shows a small row with a [+] button.
- *   2. Expanded: shows a drag-and-drop zone + browse/scanner buttons.
- *   3. File chosen: shows thumbnail (or PDF icon) + filename + size + [×] to remove.
+ * A PRESCRIPTION IS OFTEN MORE THAN ONE PAGE.  A doctor's pad runs to two or
+ * three sheets routinely, and the old widget held exactly one file, so page
+ * two had nowhere to go.  This holds a list of PAGES, in order.
  *
- * This component does NOT upload the file itself.  It just holds the chosen
- * File object and reports it to the parent via onFileSelected().
- * The parent (Billing.jsx) uploads after the invoice is saved so the
- * invoice_id is known at upload time.
+ * Nothing about the backend changed for this: the prescriptions table already
+ * stores one row per image and already allows many rows against the same
+ * patient and the same invoice.  Each page is uploaded as its own row, with
+ * its position recorded in the row's notes ("Page 2 of 3").
+ *
+ * Lifecycle:
+ *   1. Collapsed: a small row with a [+] button.
+ *   2. Expanded: drag-and-drop zone + browse/scanner buttons (both multi-select).
+ *   3. Pages chosen: a strip of numbered thumbnails, each removable, plus
+ *      "+ Add page" for the next sheet.
+ *
+ * This component does NOT upload anything.  It holds the chosen File objects
+ * and reports them to the parent via onFilesSelected().  The parent
+ * (Billing.jsx) uploads after the invoice is saved, so the invoice_id exists.
  *
  * Props:
- *   patientId      — required for the upload endpoint; null = patient not yet selected
- *   onFileSelected — called with the File object (or null to clear)
- *   disabled       — true when no patient is selected (greys out the widget)
+ *   patientId       — required for the upload endpoint; null = no patient yet
+ *   onFilesSelected — called with the File array (empty array to clear)
+ *   disabled        — true when no patient is selected (greys out the widget)
  */
 import { useRef, useState } from 'react';
 
@@ -27,51 +36,80 @@ function fmtSize(bytes) {
 
 const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_BYTES    = 10 * 1024 * 1024;
+/** Generous but finite: a prescription is a few sheets, not a scanned book. */
+const MAX_PAGES    = 10;
 
-export default function PrescriptionUpload({ patientId, onFileSelected, disabled = false }) {
-  const [expanded,    setExpanded]    = useState(false);
-  const [chosenFile,  setChosenFile]  = useState(null);
-  const [previewUrl,  setPreviewUrl]  = useState(null);  // object URL for images
-  const [dragOver,    setDragOver]    = useState(false);
-  const [fileError,   setFileError]   = useState('');
+export default function PrescriptionUpload({ patientId, onFilesSelected, disabled = false }) {
+  const [expanded, setExpanded] = useState(false);
+  // Each page: { file, url }.  url is an object URL for images, null for PDFs.
+  const [pages,    setPages]    = useState([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [fileError, setFileError] = useState('');
 
-  const browseRef  = useRef(null);   // hidden <input type="file"> for browse
-  const scanRef    = useRef(null);   // hidden <input> with capture="environment"
+  const browseRef = useRef(null);   // hidden <input type="file"> for browse
+  const scanRef   = useRef(null);   // hidden <input> with capture="environment"
 
-  // ── Handle a chosen file (from either input or drag-drop) ──────────────────
-  function handleFile(file) {
-    setFileError('');
-    if (!file) return;
-
-    if (!ALLOWED_MIME.includes(file.type)) {
-      setFileError('Unsupported file type. Use JPG, PNG, WebP, or PDF.');
-      return;
-    }
-    if (file.size > MAX_BYTES) {
-      setFileError('File too large. Maximum size is 10 MB.');
-      return;
-    }
-
-    // Revoke previous preview URL to avoid memory leaks
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-
-    const url = file.type !== 'application/pdf' ? URL.createObjectURL(file) : null;
-    setChosenFile(file);
-    setPreviewUrl(url);
-    setExpanded(false);   // collapse the drop zone once a file is chosen
-    onFileSelected(file);
+  /** Tell the parent, always as a plain File array in page order. */
+  function publish(next) {
+    setPages(next);
+    onFilesSelected(next.map((p) => p.file));
   }
 
-  function clearFile() {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setChosenFile(null);
-    setPreviewUrl(null);
+  // ── Handle chosen files (from either input or drag-drop) ───────────────────
+  // Takes a LIST: selecting all three sheets at once is the common case, and
+  // dropping them together should behave the same as adding them one by one.
+  function handleFiles(fileList) {
     setFileError('');
+    const incoming = Array.from(fileList || []);
+    if (incoming.length === 0) return;
+
+    const room = MAX_PAGES - pages.length;
+    if (room <= 0) {
+      setFileError(`A prescription can hold ${MAX_PAGES} pages.`);
+      return;
+    }
+
+    const accepted = [];
+    const rejected = [];
+    for (const file of incoming.slice(0, room)) {
+      if (!ALLOWED_MIME.includes(file.type)) {
+        rejected.push(`${file.name}: unsupported type`);
+        continue;
+      }
+      if (file.size > MAX_BYTES) {
+        rejected.push(`${file.name}: over 10 MB`);
+        continue;
+      }
+      accepted.push({
+        file,
+        url: file.type !== 'application/pdf' ? URL.createObjectURL(file) : null,
+      });
+    }
+
+    if (incoming.length > room) {
+      rejected.push(`only ${room} more page${room === 1 ? '' : 's'} can be added`);
+    }
+    // Partial success is normal — keep what was valid and say what was not,
+    // rather than throwing away three good pages because the fourth was a .doc.
+    if (rejected.length) setFileError(rejected.join(' · '));
+    if (accepted.length === 0) return;
+
+    publish([...pages, ...accepted]);
     setExpanded(false);
-    onFileSelected(null);
-    // Reset both file inputs so the same file can be re-selected
-    if (browseRef.current)  browseRef.current.value  = '';
-    if (scanRef.current)    scanRef.current.value    = '';
+  }
+
+  /** Remove one page.  The rest keep their order and renumber themselves. */
+  function removePage(index) {
+    const page = pages[index];
+    if (page?.url) URL.revokeObjectURL(page.url);
+    const next = pages.filter((_, i) => i !== index);
+    publish(next);
+    setFileError('');
+    if (next.length === 0) {
+      setExpanded(false);
+      if (browseRef.current) browseRef.current.value = '';
+      if (scanRef.current)   scanRef.current.value   = '';
+    }
   }
 
   // ── Drag-and-drop handlers ─────────────────────────────────────────────────
@@ -84,12 +122,13 @@ export default function PrescriptionUpload({ patientId, onFileSelected, disabled
     e.preventDefault();
     setDragOver(false);
     if (disabled) return;
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    handleFiles(e.dataTransfer.files);
   }
 
-  // ─── Collapsed row (no file attached) ──────────────────────────────────────
-  if (!chosenFile && !expanded) {
+  const totalBytes = pages.reduce((sum, p) => sum + (p.file.size || 0), 0);
+
+  // ─── Collapsed row (nothing attached) ──────────────────────────────────────
+  if (pages.length === 0 && !expanded) {
     return (
       <div style={rowStyle(disabled)}>
         <span style={{ fontSize: 13, color: disabled ? 'var(--text-hint)' : 'var(--text-secondary)' }}>
@@ -110,53 +149,85 @@ export default function PrescriptionUpload({ patientId, onFileSelected, disabled
     );
   }
 
-  // ─── File already chosen ───────────────────────────────────────────────────
-  if (chosenFile) {
+  // ─── Pages attached ────────────────────────────────────────────────────────
+  if (pages.length > 0 && !expanded) {
     return (
-      <div style={rowStyle(false)}>
-        {/* Thumbnail or PDF icon */}
-        <div style={thumbContainerStyle}>
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Prescription preview"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }}
-            />
-          ) : (
-            /* PDF — show a document icon placeholder */
-            <div style={{
-              width: '100%', height: '100%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(99,102,241,0.08)', borderRadius: 6,
-              fontSize: 20,
-            }}>
-              📄
+      <div style={{ ...rowStyle(false), flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, flex: 1 }}>
+            📋 Prescription · {pages.length} page{pages.length === 1 ? '' : 's'}
+            {totalBytes ? (
+              <span style={{ color: 'var(--text-hint)', fontWeight: 500, marginLeft: 6 }}>
+                · {fmtSize(totalBytes)}
+              </span>
+            ) : null}
+          </span>
+          <button
+            onClick={() => setExpanded(true)}
+            title="Add another page"
+            disabled={pages.length >= MAX_PAGES}
+            style={{
+              ...addBtnStyle(pages.length >= MAX_PAGES),
+              width: 'auto', height: 24, borderRadius: 7,
+              padding: '0 9px', fontSize: 12, fontWeight: 600, gap: 4,
+            }}
+          >
+            + Add page
+          </button>
+        </div>
+
+        {/* Page strip.  Numbered, because the ORDER is the thing that matters
+            once a prescription runs to three sheets — and it scrolls rather
+            than wrapping, so the row never pushes the bill down the screen. */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+          {pages.map((p, i) => (
+            <div key={`${p.file.name}-${i}`} style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={thumbContainerStyle} title={p.file.name}>
+                {p.url ? (
+                  <img
+                    src={p.url}
+                    alt={`Prescription page ${i + 1}`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }}
+                  />
+                ) : (
+                  <div style={{
+                    width: '100%', height: '100%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(99,102,241,0.08)', borderRadius: 6, fontSize: 20,
+                  }}>
+                    📄
+                  </div>
+                )}
+              </div>
+              {/* Page number */}
+              <span style={{
+                position: 'absolute', bottom: 2, left: 2,
+                background: 'rgba(15,23,42,0.72)', color: '#fff',
+                fontSize: 9.5, fontWeight: 700, lineHeight: 1,
+                padding: '2px 4px', borderRadius: 4,
+              }}>
+                {i + 1}
+              </span>
+              <button
+                onClick={() => removePage(i)}
+                title={`Remove page ${i + 1}`}
+                style={{
+                  position: 'absolute', top: -5, right: -5,
+                  width: 18, height: 18, borderRadius: '50%',
+                  border: '1px solid var(--glass-border)', background: '#fff',
+                  color: 'var(--text-hint)', fontSize: 12, lineHeight: 1,
+                  cursor: 'pointer', padding: 0,
+                }}
+              >
+                ×
+              </button>
             </div>
-          )}
+          ))}
         </div>
 
-        {/* File info */}
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
-            📋 Prescription attached
-          </div>
-          <div style={{
-            fontSize: 11, color: 'var(--text-secondary)', marginTop: 2,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {chosenFile.name}
-            {chosenFile.size ? <span style={{ color: 'var(--text-hint)', marginLeft: 6 }}>· {fmtSize(chosenFile.size)}</span> : null}
-          </div>
-        </div>
-
-        {/* Remove button */}
-        <button
-          onClick={clearFile}
-          title="Remove prescription"
-          style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-hint)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
-        >
-          ×
-        </button>
+        {fileError && (
+          <div style={{ fontSize: 11, color: 'var(--danger)' }}>{fileError}</div>
+        )}
       </div>
     );
   }
@@ -168,6 +239,11 @@ export default function PrescriptionUpload({ patientId, onFileSelected, disabled
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
           📋 Prescription
+          {pages.length > 0 && (
+            <span style={{ color: 'var(--text-hint)', fontWeight: 500, marginLeft: 6 }}>
+              · adding page {pages.length + 1}
+            </span>
+          )}
         </span>
         <button
           onClick={() => { setExpanded(false); setFileError(''); }}
@@ -194,20 +270,17 @@ export default function PrescriptionUpload({ patientId, onFileSelected, disabled
         }}
       >
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-          Drop image here or click to browse
+          Drop pages here or click to browse
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-          JPG · PNG · PDF · max 10 MB
+          JPG · PNG · PDF · max 10 MB each · up to {MAX_PAGES} pages
         </div>
       </div>
 
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={() => browseRef.current?.click()}
-          style={actionBtnStyle}
-        >
-          📁 Browse file
+        <button onClick={() => browseRef.current?.click()} style={actionBtnStyle}>
+          📁 Browse files
         </button>
         <button
           onClick={() => scanRef.current?.click()}
@@ -224,21 +297,25 @@ export default function PrescriptionUpload({ patientId, onFileSelected, disabled
         </div>
       )}
 
-      {/* Hidden file inputs — one for browse, one for camera/scanner capture */}
+      {/* Hidden file inputs — one for browse, one for camera/scanner capture.
+          Both take several files: a flatbed scanner hands over all three
+          sheets at once, and so does picking them in the file dialog. */}
       <input
         ref={browseRef}
         type="file"
+        multiple
         accept="image/jpeg,image/png,image/webp,application/pdf"
         style={{ display: 'none' }}
-        onChange={e => handleFile(e.target.files[0])}
+        onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
       />
       <input
         ref={scanRef}
         type="file"
+        multiple
         accept="image/*"
         capture="environment"
         style={{ display: 'none' }}
-        onChange={e => handleFile(e.target.files[0])}
+        onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
       />
     </div>
   );
@@ -274,6 +351,7 @@ function addBtnStyle(disabled) {
     fontWeight:   700,
     lineHeight:   '1',
     cursor:       disabled ? 'not-allowed' : 'pointer',
+    opacity:      disabled ? 0.5 : 1,
     display:      'flex',
     alignItems:   'center',
     justifyContent: 'center',

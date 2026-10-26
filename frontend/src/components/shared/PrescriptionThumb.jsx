@@ -24,9 +24,15 @@ export default function PrescriptionThumb({ rx, size = 44, radius = 6, onClick, 
     { skip: isPdf },
   );
 
+  // How many sheets this prescription has.  Absent on anything uploaded
+  // before multi-page existed, which means one.
+  const pageCount = rx?.page_count || rx?.pages?.length || 1;
+
   const box = {
     width: size, height: size, flexShrink: 0,
     borderRadius: radius, overflow: 'hidden',
+    // The badge below is positioned against this box.
+    position: 'relative',
     border: '1px solid var(--glass-border)',
     background: 'rgba(255,255,255,0.60)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -38,7 +44,11 @@ export default function PrescriptionThumb({ rx, size = 44, radius = 6, onClick, 
     <div
       style={box}
       onClick={onClick}
-      title={onClick ? 'Click to view full size' : undefined}
+      title={onClick
+        ? (pageCount > 1
+            ? `Click to view all ${pageCount} pages`
+            : 'Click to view full size')
+        : undefined}
       onMouseEnter={onClick ? (e => { e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-light)'; }) : undefined}
       onMouseLeave={onClick ? (e => { e.currentTarget.style.boxShadow = 'none'; }) : undefined}
     >
@@ -54,6 +64,20 @@ export default function PrescriptionThumb({ rx, size = 44, radius = 6, onClick, 
           alt={alt}
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
+      )}
+
+      {/* "3 pages" badge.  Without it the thumbnail looks identical whether
+          the prescription is one sheet or three, and nobody would think to
+          click through to the rest. */}
+      {pageCount > 1 && (
+        <span style={{
+          position: 'absolute', bottom: 2, right: 2,
+          background: 'rgba(15,23,42,0.74)', color: '#fff',
+          fontSize: Math.max(8.5, Math.round(size * 0.2)), fontWeight: 700,
+          lineHeight: 1, padding: '2px 4px', borderRadius: 4,
+        }}>
+          {pageCount}p
+        </span>
       )}
     </div>
   );

@@ -49,6 +49,24 @@ class Prescription(Base):
     # Optional short note the pharmacist can attach ("front side only", etc.)
     notes       = Column(Text, nullable=True)
 
+    # --- Multi-page prescriptions -------------------------------------------
+    # ONE PRESCRIPTION, SEVERAL SHEETS.  A doctor's pad routinely runs to two
+    # or three pages, and each page is stored as its own row here.  These two
+    # columns are the only thing tying those rows back together:
+    #   group_id    — the same opaque id on every page uploaded in one go
+    #   page_number — 1-based position within that group, so order survives
+    #
+    # BOTH ARE NULL ON EVERY ROW WRITTEN BEFORE THIS EXISTED, and readers must
+    # keep treating a NULL group_id as "a prescription of one page, by itself".
+    # That is what those rows actually are, so no backfill is needed and the
+    # pharmacy's existing prescriptions display exactly as they did.
+    #
+    # Deliberately NOT grouped by invoice_id instead: a prescription can be
+    # uploaded before any bill exists (invoice_id is nullable), and two
+    # separate prescriptions can legitimately hang off one invoice.
+    group_id    = Column(String, nullable=True, index=True)
+    page_number = Column(Integer, nullable=True)
+
     # Relationships for convenient JOIN access
     patient  = relationship("Patient", foreign_keys=[patient_id], lazy="select")
     invoice  = relationship("Invoice", foreign_keys=[invoice_id], lazy="select")
