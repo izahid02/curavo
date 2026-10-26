@@ -48,6 +48,7 @@ Sort order (applied in Python after the query):
   each product so the earliest-expiring batch is offered first.
 """
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -134,6 +135,10 @@ class MedicineSearchResult(BaseModel):
     units_per_strip: Optional[int]  = None
     strip_mrp:       Optional[float] = None
     unit_mrp:        Optional[float] = None
+    # 'H1' | 'MTP' | None.  Carried so the billing screen can warn BEFORE the
+    # pharmacist reaches the end of the bill that this sale will need the
+    # patient's and the doctor's details.  The server still enforces it.
+    register_category: Optional[str] = None
     # available_stock is always in individual UNITS; these two are the derived
     # view of it.  available_strips is whole strips only (integer division).
     available_strips: Optional[int] = None
@@ -198,14 +203,80 @@ def _has_unsellable_stock(db: Session, product_id: int, cutoff: date) -> bool:
     )
 
 
-def _strip_prices(product: Product) -> tuple[Optional[float], Optional[float], Optional[int]]:
+def _strip_prices(
+    product: Product,
+    batch:   Optional[Batch] = None,
+) -> tuple[Optional[float], Optional[float], Optional[int]]:
     """
     Resolve (strip_mrp, unit_mrp, units_per_strip) for display.
 
-    unit_mrp is normally stored, but older products may only have a strip
-    price — derive the per-tablet price so the dropdown always has both.
+    ⚠ PRICES COME FROM THE BATCH, NOT THE PRODUCT.
+    products.strip_mrp / unit_mrp hold only the price of the LATEST delivery.
+    Two batches of the same medicine bought at different rates are a normal,
+    everyday occurrence, and reading the product fields made every batch of a
+    medicine quote whichever price was entered last.  That was wrong twice over:
+
+      1. The dropdown showed one price for batches that genuinely differ, so a
+         batch bought at ₹266.10/strip was offered at ₹292.05.
+      2. The browser priced the bill from these fields while the server charged
+         batch.selling_price, so the on-screen TOTAL and the printed receipt
+         disagreed on the same sale.
+
+    So when a batch is given (every sellable row), both prices derive from THAT
+    batch's selling_price — the very field billing_service charges with, which
+    is what makes the screen, the receipt and the batch panel agree.
+
+    units_per_strip still comes from the product: how many tablets are in a
+    strip is a property of the medicine, not of a delivery.
+
+    Without a batch (the greyed-out out-of-stock row) there is nothing to derive
+    from, so the product's own fields are used as a last-known-price indication.
+    That row is not sellable and cannot reach a bill.
     """
-    units_per_strip = int(product.units_per_strip) if product.units_per_strip else None
+    # A non-strip medicine (syrup, injection) has no strip price at all; gating
+    # on is_strip stops a bottle from being quoted "per strip".
+    units_per_strip = (
+        int(product.units_per_strip)
+        if product.is_strip and product.units_per_strip
+        else None
+    )
+
+    if batch is not None:
+        # selling_price is the per-unit MRP the server bills with; mrp is the
+        # fallback for older rows written before selling_price was populated.
+        unit_raw = batch.selling_price if batch.selling_price is not None else batch.mrp
+        if unit_raw is None:
+            return None, None, units_per_strip
+
+        unit_dec  = Decimal(str(unit_raw))
+        strip_dec = None
+
+        if units_per_strip:
+            # DELIBERATELY NOT SNAPPED TO product.strip_mrp.
+            # The batch panel does snap: a ₹100 strip of 15 tablets stores as
+            # ₹6.67/unit and 6.67 × 15 reads back as ₹100.05, so it shows the
+            # printed ₹100.00 instead.  That is right for a panel that only
+            # *describes* stock — but this figure becomes the bill line's unit
+            # price, and billing_service charges selling_price × units, i.e.
+            # ₹100.05.  Snapping here would put ₹100.00 on screen while ₹100.05
+            # was charged — a five-paise rerun of the very bug this function
+            # exists to fix, and the pharmacist would once again have no idea
+            # which of the two numbers to trust.
+            #
+            # So the dropdown shows exactly what the customer will be charged,
+            # even when that is a few paise off the printed box.  The underlying
+            # cause is that a per-unit price in paise cannot always represent a
+            # strip price exactly; fixing THAT means billing whole strips at the
+            # strip price, which is a billing change, not a display one.
+            strip_dec = unit_dec * units_per_strip
+
+        return (
+            float(strip_dec) if strip_dec is not None else None,
+            float(unit_dec),
+            units_per_strip,
+        )
+
+    # ── No batch: out-of-stock row, product fallback ────────────────────────
     strip_price = float(product.strip_mrp) if product.strip_mrp is not None else None
     unit_price  = float(product.unit_mrp) if product.unit_mrp is not None else None
 
@@ -228,7 +299,7 @@ def _build_batch_row(
     batch — used only for the low-stock dot, because min_stock_level is a
     property of the medicine, not of a single delivery.
     """
-    strip_price, unit_price, units_per_strip = _strip_prices(product)
+    strip_price, unit_price, units_per_strip = _strip_prices(product, batch)
     is_strip = bool(product.is_strip)
     stock    = int(batch.quantity_available or 0)
 
@@ -255,6 +326,7 @@ def _build_batch_row(
         units_per_strip=units_per_strip,
         strip_mrp=strip_price,
         unit_mrp=unit_price,
+        register_category=product.register_category,
         # Strip maths: stock is stored in individual units, so whole strips is
         # integer division — 155 tablets at 10/strip reads as "15 strips".
         available_strips=(stock // units_per_strip) if is_strip and units_per_strip else None,
@@ -300,6 +372,7 @@ def _build_unavailable_row(
         units_per_strip=units_per_strip,
         strip_mrp=strip_price,
         unit_mrp=unit_price,
+        register_category=product.register_category,
         available_strips=0 if product.is_strip and units_per_strip else None,
         available_units=0,
         alternatives=alternatives,

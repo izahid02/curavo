@@ -91,6 +91,12 @@ class Product(Base):
     unit            = Column(String(30), default="unit")
     min_stock_level = Column(Integer, nullable=False, default=10)
     is_active       = Column(Boolean, nullable=False, default=True)
+    # Which register this medicine's sale must be written into: 'H1' (Schedule
+    # H1), 'MTP' (the MTP kit), or NULL for everything else — which is most of
+    # the shelf.  Set only after a pharmacist CONFIRMS the match; see
+    # services/drug_schedules.py, which proposes matches and never applies
+    # them.  A register built from guesses is worse than no register.
+    register_category = Column(String(8), nullable=True, index=True)
     # Phase 3.3: pharmacist override — how many days one unit lasts for this product
     days_per_unit   = Column(Integer, nullable=True)
 
@@ -107,7 +113,12 @@ class Product(Base):
     strip_mrp       = Column(Numeric(10, 2), nullable=True)   # price of a full strip
     # Normally strip_mrp / units_per_strip, but the pharmacist can override it
     # (loose tablets often carry a small premium over the per-strip rate).
-    unit_mrp        = Column(Numeric(10, 2), nullable=True)
+    #
+    # FOUR decimals, not two: this is a DERIVED price.  A Rs.100 strip of 15 is
+    # Rs.6.6667 a tablet; rounded to Rs.6.67 a whole strip bills at Rs.100.05 and
+    # the customer is overcharged five paise for a price printed on the pack.
+    # strip_mrp above stays at 2dp -- that one IS printed on the pack.
+    unit_mrp        = Column(Numeric(12, 4), nullable=True)
 
     created_at      = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
@@ -135,10 +146,27 @@ class Batch(Base):
     product_id         = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     supplier_id        = Column(Integer, ForeignKey("suppliers.id"))
     batch_number       = Column(String(60))
-    # Numeric(10,2) handles amounts up to 99,999,999.99 — safe for any drug price
-    mrp                = Column(Numeric(10, 2), nullable=False)
-    purchase_price     = Column(Numeric(10, 2), nullable=False)
-    selling_price      = Column(Numeric(10, 2), nullable=False)
+    # PER-UNIT SELLING PRICES KEEP FOUR DECIMALS.  A strip is a pricing
+    # convenience, never a storage unit, so a Rs.100 strip of 15 tablets lands
+    # here as Rs.6.6667 a tablet.  At 2dp it reads back Rs.6.67 and billing
+    # charges 6.67 x 15 = Rs.100.05 for a strip whose pack says Rs.100 -- five
+    # paise of overcharge on every strip sold, for every strip medicine.
+    #
+    # SQLite does not enforce a column's scale, so the full 4dp value was always
+    # physically in the file; it was SQLAlchemy that rounded it on the way OUT,
+    # to the scale declared here.  Widening this therefore needs NO migration
+    # and fixes stock already on the shelf.  Line totals still quantize to paise
+    # in billing_service -- that IS the money.  (max 99,999,999.9999)
+    mrp                = Column(Numeric(12, 4), nullable=False)
+    # Also 4dp, and for the same reason as the prices above.  Left at 2dp in
+    # the first pass on the grounds that it only moved report figures -- which
+    # turned out to be the wrong call: it is half of every margin on screen,
+    # and at 2dp a 5+1 delivery's cost disagreed with what Add Stock had just
+    # promised.  Past INVOICES are unaffected (they snapshot their own cost);
+    # what this changes is current stock valuation, which becomes more
+    # accurate, not different in kind.
+    purchase_price     = Column(Numeric(12, 4), nullable=False)
+    selling_price      = Column(Numeric(12, 4), nullable=False)
     mfg_date           = Column(Date)
     expiry_date        = Column(Date, nullable=False, index=True)
     quantity_received  = Column(Integer, nullable=False)
@@ -157,13 +185,20 @@ class Batch(Base):
     #   scheme_label             — the human string, e.g. "5+1"
     #   bonus_quantity           — how many of quantity_received were free
     #   paid_quantity            — how many were actually paid for
-    #   effective_cost_per_unit  — cost x paid / total (informational only)
+    #   effective_cost_per_unit  — cost x paid / total.  NOT informational:
+    #                              this is THE cost of one unit of this batch,
+    #                              read by the batch panel, by billing when it
+    #                              snapshots profit, and by every stock
+    #                              valuation.  See services/costing.py.
     scheme_buy              = Column(Integer, nullable=True)
     scheme_free             = Column(Integer, nullable=True)
     scheme_label            = Column(String, nullable=True)
     bonus_quantity          = Column(Integer, default=0)
     paid_quantity           = Column(Integer, nullable=True)
-    effective_cost_per_unit = Column(Numeric(10, 2), nullable=True)
+    # FOUR decimals, for the reason in CLAUDE.md s4: a Rs.23.62 strip of 15
+    # spread over a 5+1 scheme is Rs.1.3122 a tablet, and rounding that to
+    # paise drifts a 180-unit delivery by about 40 paise of reported profit.
+    effective_cost_per_unit = Column(Numeric(12, 4), nullable=True)
     created_at         = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     product   = relationship("Product", back_populates="batches")

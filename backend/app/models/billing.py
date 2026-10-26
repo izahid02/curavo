@@ -94,8 +94,20 @@ class InvoiceItem(Base):
     # that group by product without having to join through batches every time
     product_id     = Column(Integer, ForeignKey("products.id"), nullable=False)
     quantity       = Column(Integer, nullable=False)
-    unit_price     = Column(Numeric(10, 2), nullable=False)   # selling_price at time of sale
-    purchase_price = Column(Numeric(10, 2), nullable=False)   # snapshot — for profit calc
+    # FOUR decimals, matching Batch.selling_price, which this is a snapshot of.
+    # revenue.py nets a partial return as unit_price x (quantity - returned_qty)
+    # IN SQL, where SQLite reads the raw stored number -- so at 2dp the Python
+    # read and the SQL sum disagreed, and a fully returned strip refunded
+    # Rs.100.05 against a Rs.100.00 sale.  Old rows physically hold 2dp values
+    # and read back unchanged, so past invoices are untouched.
+    unit_price     = Column(Numeric(12, 4), nullable=False)   # selling_price at time of sale
+    # FOUR decimals, like unit_price beside it.  This is half of every margin
+    # the app reports, and a Rs.23.62 strip of 15 under a 5+1 scheme costs
+    # Rs.1.3120 a tablet -- read back as Rs.1.31 it disagreed with the batch
+    # panel and the Add Stock preview, which is the bug that started this.
+    # Rows written while this said 2dp hold a true 2-decimal number and read
+    # back unchanged, so past invoices keep the profit they always reported.
+    purchase_price = Column(Numeric(12, 4), nullable=False)   # snapshot — for profit calc
     gst_rate       = Column(Numeric(5, 2), nullable=False)    # snapshot — do NOT use product's current rate
     line_total     = Column(Numeric(12, 2), nullable=False)   # qty * unit_price * (1 + gst_rate/100)
     # Phase 3.3: estimated date when this purchased supply will run out (for refill reminders)

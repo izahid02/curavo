@@ -108,9 +108,12 @@ CREATE TABLE batches (
     product_id          INTEGER NOT NULL REFERENCES products(id),
     supplier_id         INTEGER REFERENCES suppliers(id),
     batch_number        VARCHAR(60),
-    mrp                 NUMERIC(10,2) NOT NULL,    -- printed max retail price
+    -- 4dp, not 2: these are PER-UNIT prices.  A Rs.100 strip of 15 tablets is
+    -- Rs.6.6667 each; at 2dp a whole strip bills at Rs.100.05.  SQLite ignores
+    -- the scale, so this only bites on a database that enforces it.
+    mrp                 NUMERIC(12,4) NOT NULL,    -- printed max retail price
     purchase_price      NUMERIC(10,2) NOT NULL,    -- what we paid (for profit calc)
-    selling_price       NUMERIC(10,2) NOT NULL,    -- what we charge
+    selling_price       NUMERIC(12,4) NOT NULL,    -- what we charge
     mfg_date            DATE,
     expiry_date         DATE NOT NULL,
     quantity_received   INTEGER NOT NULL,
@@ -206,7 +209,7 @@ CREATE TABLE invoice_items (
     batch_id        INTEGER NOT NULL REFERENCES batches(id),
     product_id      INTEGER NOT NULL REFERENCES products(id), -- denormalised for reports
     quantity        INTEGER NOT NULL,
-    unit_price      NUMERIC(10,2) NOT NULL,   -- selling price at time of sale
+    unit_price      NUMERIC(12,4) NOT NULL,   -- selling price at time of sale (4dp: see batches.mrp)
     purchase_price  NUMERIC(10,2) NOT NULL,   -- snapshot, so profit is locked in
     gst_rate        NUMERIC(5,2) NOT NULL,
     line_total      NUMERIC(12,2) NOT NULL,   -- qty * unit_price (incl. its share)

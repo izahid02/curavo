@@ -50,6 +50,30 @@ export function stockLabel(quantity, isStrip, unitsPerStrip) {
   };
 }
 
+/**
+ * Colour band for the EARLIEST expiry across a medicine's batches, as the
+ * medicines table shows it.
+ *
+ * Takes an ISO date.  Not to be confused with the Medicine Batch panel's own
+ * local expiryTone(days), which is deliberately coarser: there the pharmacist
+ * is checking prices, here they are scanning a list for what is about to die.
+ *
+ * THIS PHARMACY DOES NOT SELL ANYTHING WITH LESS THAN A MONTH LEFT, so "under
+ * 30 days" is treated exactly like already expired: it is dead stock either
+ * way.  The point of showing expiry at all is to catch it while it can still
+ * go back to the distributor, not to mourn it afterwards.
+ *
+ * @returns { color, note }  note = short line under the date, or null
+ */
+export function nearestExpiryTone(isoDate) {
+  if (!isoDate) return { color: 'var(--text-hint)', note: null };
+  const days = Math.round((new Date(isoDate) - new Date()) / 86400000);
+  if (days <   0) return { color: 'var(--danger)', note: 'expired' };
+  if (days <= 30) return { color: 'var(--danger)', note: 'under a month' };
+  if (days <= 90) return { color: 'var(--warn)',   note: `${Math.round(days / 30)} months left` };
+  return            { color: 'var(--text-secondary)', note: null };
+}
+
 /** Colour band for a margin percentage: green >20%, amber 10–20%, red <10%. */
 export function marginTone(pct) {
   if (pct >= 20) return { color: 'var(--ok)',     bg: 'var(--ok-bg)',     border: 'rgba(16,185,129,0.30)' };
