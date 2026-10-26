@@ -340,6 +340,111 @@ Current stock of a product = SUM(quantity_available) across
   per-unit field is read-only, so the two can never disagree.  Entry is always
   in strips; there is no "enter units" mode.
 
+**A PRICE SHOWN FOR A BATCH COMES FROM THAT BATCH — NEVER FROM THE PRODUCT.**
+  products.strip_mrp / unit_mrp hold ONLY the latest delivery's price; Add
+  Stock overwrites them every time.  Two batches of one medicine bought at
+  different rates is normal, so the product fields are the right answer only
+  where there is no batch in view (the Products list, a product detail).
+  Anywhere a specific batch is on screen, derive from it:
+    unit price  = batch.selling_price
+    strip price = batch.selling_price × units_per_strip
+  units_per_strip still comes from the product — tablets-per-strip belongs to
+  the medicine, not to a delivery.
+
+  ⚠ WHY THIS IS A MONEY BUG, NOT A DISPLAY ONE.  search.py read the product
+  fields, and the browser prices the bill line from whatever search returns
+  while billing_service charges batch.selling_price × units.  Two symptoms,
+  one cause, both seen in the shop (Oct 2026):
+    - IROLLA TAB had batches at ₹266.10 and ₹292.05/strip.  Both were offered
+      at ₹292.05, and FEFO sells the ₹266.10 batch first → ₹25.95 overcharge
+      on a strip whose own box said otherwise.
+    - PANTOCID DSR showed TOTAL ₹18.40 on screen, ₹16.81 on the receipt.
+  Fixed in search.py::_strip_prices(product, batch).
+  Guard: backend/scripts/test_batch_pricing.py — asserts the screen price
+  multiplies out to exactly what billing_service charges, in both modes.
+
+  The batch panel (routers/inventory.py) snaps a derived strip price back to
+  products.strip_mrp when it is within half a paisa per unit — ₹6.67 × 15 is
+  ₹100.05, and the panel shows the printed ₹100.00.  search.py deliberately
+  does NOT snap: its figure becomes the bill line's unit price, so snapping
+  would show ₹100.00 while charging ₹100.05 — the same bug, five paise wide.
+  A panel that describes stock may round to the box; a price about to be
+  charged may not.
+
+**A PER-UNIT PRICE KEEPS FOUR DECIMALS.  THE COLUMN'S SCALE IS A MONEY
+  DECISION, NOT A STORAGE DETAIL.**
+  A ₹100 strip of 15 tablets is ₹6.6667 a tablet.  Nothing rounds it to
+  paise on the way in — the Add Stock form sends 4dp and the batch editor
+  sends an unrounded division — so a 2-dp column was never losing the value
+  on write.  SQLite does not enforce a column's precision at all; the full
+  6.6667 was always physically in the file.
+
+  SQLAlchemy is what rounded it, on the way OUT, to the scale DECLARED ON THE
+  MODEL.  So Numeric(10, 2) handed billing_service ₹6.67, it charged
+  6.67 × 15 = ₹100.05, and the customer paid five paise over a price printed
+  on the box — on every strip, of every strip medicine, forever.
+
+  Consequences worth remembering:
+    - The scale in models/*.py decides what a customer is charged.  Treat
+      narrowing one the way you would treat changing a price.
+    - Widening it needed NO migration and fixed stock already on the shelf,
+      because the data was never the problem.  (On Postgres it would be.)
+    - Old invoices are untouched: rows written while the model said 2dp hold
+      a true 2-dp number and read back unchanged.
+    - revenue.py nets a partial return in SQL
+      (unit_price × (quantity − returned_qty)), where SQLite reads the RAW
+      stored number.  At 2dp the Python read and the SQL sum disagreed, so a
+      fully returned strip refunded ₹100.05 against a ₹100.00 sale.
+
+  4dp: batches.mrp, batches.selling_price, batches.purchase_price,
+       batches.effective_cost_per_unit, products.unit_mrp,
+       invoice_items.unit_price, invoice_items.purchase_price,
+       stock_purchases.cost_price / effective_cost
+  2dp: products.strip_mrp (printed on the pack — it IS two decimals),
+       every line total and invoice total (that IS the money).
+
+  The cost columns were left at 2dp in the first pass, on the grounds that
+  they only moved report figures.  That was wrong: cost is half of every
+  margin on screen, and at 2dp a 5+1 delivery's cost disagreed with the
+  figure Add Stock had just promised.  Past invoices were unaffected either
+  way — they snapshot their own cost.
+
+  Round to paise at the LAST moment, for display only: inr() caps at 2dp, and
+  Billing.jsx::lineCalc quantizes each line in the same order the server does
+  (total first, then GST extracted from the rounded total).
+  Guard: test_batch_pricing.py section 7 — asserts the four columns still
+  declare 4dp and that a whole strip bills at the price printed on it.
+
+**ONE DELIVERY, ONE MARGIN.  THE COST OF A UNIT IS DEFINED IN ONE PLACE:
+  services/costing.py.**
+  Three screens once read three different cost fields and showed three
+  different margins for the same box (Oct 2026, reported from the shop):
+
+    DOLO 650, 10 strips of 15 at ₹24.86 ex-GST, 5% trade discount, 5+1
+    scheme, strip MRP ₹32.12 incl 5% GST (= ₹30.59 ex-GST):
+      Add Stock promised   35.7%   <- ₹19.68/strip, the real figure
+      Batch panel said     18.7%   <- stock_purchases.cost_price, the RATE CARD
+      Reports said         23.0%   <- batch.purchase_price, discount but no bonus
+
+  ₹236.16 bought twelve strips, so a strip cost ₹19.68 and a tablet ₹1.3122.
+  The other two OVERSTATE cost, which understates profit — a healthy line
+  looks marginal and gets priced against.
+
+  The order, most-adjusted first (costing.unit_cost, and the same order in SQL
+  via costing.unit_cost_column):
+    1. batch.effective_cost_per_unit   discount AND free goods
+    2. batch.purchase_price            discount only
+    3. stock_purchases.cost_price      neither — the rate card
+  effective_cost_per_unit was marked "informational only" and read by nothing.
+  It was the right number all along.
+
+  A bonus unit is not free stock beside paid stock: it lowers what EVERY unit
+  in the batch cost, because the money was paid for the lot.  That is also why
+  valuing a shelf at the rate card overstates inventory.
+  Both sides of a margin must be ex-GST — GST is collected, never earned.
+  Guard: backend/scripts/test_scheme_margin.py, which books this exact
+  delivery and asserts the panel, billing and reports all agree.
+
 **PURCHASE SCHEMES ARE COUNTED IN PACKS, NOT TABLETS.**
   When a distributor says "5+1" on a strip medicine they mean *buy 5 STRIPS,
   get 1 strip free* — never "buy 5 tablets, get 1 tablet free".  Same for any

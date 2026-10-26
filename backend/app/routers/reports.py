@@ -27,6 +27,7 @@ from app.models.billing import Invoice, InvoiceItem
 from app.models.inventory import Batch, Department, Product
 from app.models.patients import Patient, patient_departments_table
 from app.models.user import User
+from app.services import costing
 from app.services.auth_service import get_current_user
 # The single definition of "how much actually stayed sold" after a partial
 # return.  Every revenue figure in this file goes through these.
@@ -515,7 +516,7 @@ def _expiry_bucket(db: Session, today: date, d_start: Optional[date], d_end: Opt
     """
     q = db.query(
         func.count(Batch.id).label("cnt"),
-        func.sum(Batch.quantity_available * Batch.purchase_price).label("loss"),
+        func.sum(Batch.quantity_available * costing.unit_cost_column()).label("loss"),
     ).filter(Batch.quantity_available > 0)
 
     if d_start is not None:
@@ -558,7 +559,7 @@ def get_inventory_report(
 
     value_row = (
         db.query(
-            func.sum(Batch.quantity_available * Batch.purchase_price).label("inv_value"),
+            func.sum(Batch.quantity_available * costing.unit_cost_column()).label("inv_value"),
             func.sum(Batch.quantity_available * Batch.selling_price).label("ret_value"),
         )
         .filter(Batch.quantity_available > 0, Batch.expiry_date >= today)
@@ -646,7 +647,7 @@ def get_inventory_report(
         db.query(
             Product.name,
             func.sum(Batch.quantity_available).label("qty"),
-            func.sum(Batch.quantity_available * Batch.purchase_price).label("total_value"),
+            func.sum(Batch.quantity_available * costing.unit_cost_column()).label("total_value"),
         )
         .join(Batch, Batch.product_id == Product.id)
         .filter(
@@ -655,7 +656,7 @@ def get_inventory_report(
             Product.is_active == True,
         )
         .group_by(Product.id, Product.name)
-        .order_by(func.sum(Batch.quantity_available * Batch.purchase_price).desc())
+        .order_by(func.sum(Batch.quantity_available * costing.unit_cost_column()).desc())
         .limit(10)
         .all()
     )

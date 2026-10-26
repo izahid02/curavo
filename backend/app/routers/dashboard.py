@@ -23,6 +23,7 @@ from app.models.inventory import Batch, Product, StockPurchase
 from app.models.patients import Patient
 from app.models.supplier_credit import SupplierCreditTransaction
 from app.models.user import User
+from app.services import costing
 from app.services.auth_service import get_current_user
 from app.services.inventory_service import count_expiry_alert_products
 # Revenue net of partial returns — see app/services/revenue.py for why every
@@ -360,7 +361,7 @@ def get_dashboard_summary(
     # 3. Inventory value — qty × purchase_price for non-expired stock
     # ------------------------------------------------------------------
     inventory_value = _to_float(
-        db.query(func.sum(Batch.quantity_available * Batch.purchase_price))
+        db.query(func.sum(Batch.quantity_available * costing.unit_cost_column()))
         .filter(
             Batch.quantity_available > 0,
             Batch.expiry_date >= today,

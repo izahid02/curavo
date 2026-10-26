@@ -22,8 +22,12 @@ binaries = []
 # collect_all pulls in package metadata + data files that these libraries load
 # at runtime via importlib.metadata (a classic source of "works in dev, breaks
 # when frozen" bugs).  We extend datas/binaries/hiddenimports from each.
+# openpyxl writes the Schedule H1 register export.  Without it here the frozen
+# build falls back to CSV while the dev machine produces .xlsx -- the export
+# still works, which is worse: the difference is silent and only shows up on
+# the pharmacy's PC.
 for pkg in ("fastapi", "starlette", "pydantic", "pydantic_settings",
-            "uvicorn", "sqlalchemy", "jose", "bcrypt"):
+            "uvicorn", "sqlalchemy", "jose", "bcrypt", "openpyxl"):
     _d, _b, _h = collect_all(pkg)
     datas += _d
     binaries += _b

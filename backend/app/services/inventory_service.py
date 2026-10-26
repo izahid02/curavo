@@ -468,7 +468,7 @@ def _compute_scheme(
         free_units     = scheme_free x units_per_pack
         bonus_quantity = (paid_quantity // buy_units) x free_units
         total_quantity = paid_quantity + bonus_quantity
-        effective_cost = cost x paid_quantity / total_quantity  (informational)
+        effective_cost = cost x paid_quantity / total_quantity
 
     `units_per_pack` is the product's units_per_strip for a strip medicine and 1
     for everything else — a syrup bottle IS the pack, so "5+1" already means 5
@@ -508,8 +508,10 @@ def _compute_scheme(
 
     effective_cost = None
     if cost and cost > 0 and total_quantity > 0:
+        # 4dp, like every other per-unit cost: paise-rounding here is a real
+        # drift once it is multiplied back up over a delivery.
         effective_cost = (cost * Decimal(paid_quantity) / Decimal(total_quantity)) \
-            .quantize(Decimal("0.01"))
+            .quantize(_UNIT)
 
     return {
         "scheme_buy": data.scheme_buy,
