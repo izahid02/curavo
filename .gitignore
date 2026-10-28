@@ -49,3 +49,6 @@ frontend/.vite/
 .DS_Store
 **/.DS_Store
 backend/venv/
+
+# Local agent settings — not part of the app
+.claude/
