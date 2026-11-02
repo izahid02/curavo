@@ -54,6 +54,10 @@ class Shop(Base):
     pending_licence_until = Column(String(10))
     pending_licence_set_at = Column(DateTime)
 
+    # A PILOT shop gets a new release first (status PILOT); everyone else only
+    # once ARZ moves it to ALL.  Set from the shop's page in the panel.
+    pilot = Column(Boolean, default=False, nullable=False, server_default="0")
+
 
 class Heartbeat(Base):
     """A shop checking in (every ~15 minutes).  Kept 30 days."""
@@ -124,3 +128,30 @@ class AdminAudit(Base):
     action  = Column(String(50))
     shop_id = Column(Integer, ForeignKey("shops.id"))
     detail  = Column(Text)
+
+
+class Release(Base):
+    """
+    One version of the Windows installer that shops can update to.
+
+    status:
+      PILOT   only shops marked "pilot" are offered it
+      ALL     every shop is offered it
+      PAUSED  nobody is offered it (a bad release, held back)
+    The installer file sits in <data>/releases/; `signature` is the .sig file
+    the build made with ARZ's UPDATE key - the shop PC refuses the installer
+    if it does not match.
+    """
+    __tablename__ = "releases"
+
+    id          = Column(Integer, primary_key=True)
+    version     = Column(String(30), unique=True, nullable=False)
+    notes       = Column(Text)
+    critical    = Column(Boolean, default=False, nullable=False)
+    status      = Column(String(10), default="PILOT", nullable=False)
+    filename    = Column(String(200), nullable=False)
+    signature   = Column(Text, nullable=False)
+    size        = Column(BigInteger)
+    sha256      = Column(String(64))
+    created_at  = Column(DateTime, default=utcnow)
+    status_changed_at = Column(DateTime, default=utcnow)

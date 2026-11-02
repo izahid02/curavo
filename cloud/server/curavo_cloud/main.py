@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from curavo_cloud.config import settings
 from curavo_cloud.db import Base, SessionLocal, engine
 from curavo_cloud.models import AdminUser
-from curavo_cloud.routers import admin, agent
+from curavo_cloud.routers import admin, agent, updates
 from curavo_cloud.security import hash_password
 
 PANEL_DIST = Path(__file__).resolve().parents[2] / "admin" / "dist"
@@ -40,9 +40,28 @@ def _seed_admin():
         db.close()
 
 
+# Columns added after a table first existed.  create_all() makes new TABLES
+# but never adds a column to an existing one, so each is added here once.
+# (Same idea as the desktop app's migration ledger, kept tiny on purpose.)
+_ADDED_COLUMNS = [
+    ("shops", "pilot", "BOOLEAN NOT NULL DEFAULT 0"),
+]
+
+
+def _add_missing_columns():
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, column, ddl in _ADDED_COLUMNS:
+            if table in insp.get_table_names() and column not in {c["name"] for c in insp.get_columns(table)}:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+                logging.info("Added column %s.%s", table, column)
+
+
 @asynccontextmanager
 async def lifespan(_app):
     Base.metadata.create_all(bind=engine)
+    _add_missing_columns()
     _seed_admin()
     yield
 
@@ -50,6 +69,7 @@ async def lifespan(_app):
 app = FastAPI(title="Curavo Cloud", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.include_router(agent.router)
 app.include_router(admin.router)
+app.include_router(updates.router)
 
 
 @app.get("/health")
@@ -63,7 +83,7 @@ if PANEL_DIST.exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def panel(path: str):
-        if path.startswith(("admin/api", "agent/")):
+        if path.startswith(("admin/api", "agent/", "updates/", "download/")):
             from fastapi import HTTPException
             raise HTTPException(status_code=404)
         f = (PANEL_DIST / path).resolve()

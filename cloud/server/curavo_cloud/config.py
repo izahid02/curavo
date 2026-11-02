@@ -13,6 +13,11 @@ Settings for the Curavo cloud server, read from environment variables.
                            from the panel after that).
   CURAVO_BACKUP_DAYS       how many days of backups to keep per shop (30)
   CURAVO_MAX_BACKUP_MB     largest single upload accepted (500)
+  CURAVO_PUBLIC_URL        the address shops reach this server at, e.g.
+                           https://cloud.curavo.in - used in update download
+                           links.  Default: whatever address the request came to.
+  CURAVO_RELEASE_TOKEN     lets the GitHub build upload a new release without
+                           a panel login.  Unset = only the panel can upload.
 """
 import os
 import secrets
@@ -30,6 +35,10 @@ class Settings:
         self.admin_password = os.environ.get("CURAVO_ADMIN_PASSWORD", "")
         self.backup_days = int(os.environ.get("CURAVO_BACKUP_DAYS", "30"))
         self.max_backup_bytes = int(os.environ.get("CURAVO_MAX_BACKUP_MB", "500")) * 1024 * 1024
+        self.release_dir = self.data_dir / "releases"
+        self.release_dir.mkdir(exist_ok=True)
+        self.public_url = os.environ.get("CURAVO_PUBLIC_URL", "").rstrip("/")
+        self.release_token = os.environ.get("CURAVO_RELEASE_TOKEN", "")
         self.secret = self._secret()
 
     def _secret(self) -> str:

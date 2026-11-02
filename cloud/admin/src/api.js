@@ -43,3 +43,18 @@ export async function download(path) {
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }
+
+/** Send a form with files (the release upload). */
+export async function upload(path, formData) {
+  const res = await fetch(`/admin/api${path}`, {
+    method: 'POST', body: formData,
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+  });
+  if (res.status === 401) { setToken(null); window.location.assign('/login'); throw new ApiError(401, 'Please sign in again.'); }
+  if (!res.ok) {
+    let msg = `Error ${res.status}`;
+    try { msg = (await res.json()).detail || msg; } catch { /* not JSON */ }
+    throw new ApiError(res.status, typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return res.json();
+}

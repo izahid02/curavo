@@ -33,6 +33,26 @@ and put `pharmacy.db` + `branding/` on the shop's PC by the restore steps in CLA
 Open http://localhost:8100 and sign in as `arz`. Point a shop's backend at it with
 `CURAVO_CLOUD_URL=http://127.0.0.1:8100`.
 
+## App updates
+
+Curavo Control -> **App updates**: upload `Curavo_X.Y.Z_x64-setup.exe` plus its `.exe.sig` (both come out
+of the GitHub build; once the cloud is live the build uploads them itself). A new version starts as
+**Pilot shops** only; press **Send to everyone** when the pilots are happy, or **Pause** to hold it back.
+Mark pilot shops on their own page. Shops check every 6 hours, download quietly and install when Curavo
+is closed. The website's Download button can point at `/download/windows` (newest version for everyone).
+
+### Testing updates on a real Windows PC (no server needed)
+
+1. On the Mac: `CURAVO_PUBLIC_URL=http://<mac-ip>:8100 ... uvicorn curavo_cloud.main:app --host 0.0.0.0 --port 8100`
+2. On GitHub: run the build by hand twice with **test_build** ticked, e.g. `0.3.0-beta.1` and `0.3.0-beta.2`
+   (needs the `TAURI_SIGNING_PRIVATE_KEY` secret).
+3. Install beta.1 on the Windows PC. Create `%APPDATA%\HCC\cloud_url.txt` containing `http://<mac-ip>:8100`
+   and restart Curavo: it registers and appears in Curavo Control. Tick **Pilot shop**.
+4. Upload beta.2 (exe + sig) in **App updates**. Within ~2 minutes of the next Curavo start the banner
+   says "Curavo 0.3.0-beta.2 is ready". Close Curavo -> it installs; open it -> the panel shows beta.2.
+5. Also try: **Install now**; a beta.3 uploaded then **Paused** (must not arrive); an installer whose `.sig`
+   is from another build (must be refused).
+
 ## Going live (not done yet)
 
 1. Rent a small server in India (Ubuntu), point a domain at it (e.g. `cloud.curavo.in`), HTTPS via Caddy or nginx.

@@ -8,6 +8,9 @@ const LABEL = {
   enable: 'Enabled shop', notes: 'Edited notes', clear_conflict: 'Cleared two-PC flag',
   download_backup: 'Downloaded a backup', resolve_error: 'Marked error fixed', reopen_error: 'Reopened error',
   change_password: 'Changed panel password',
+  upload_release: 'Uploaded an app version', release_pilot: 'Release to pilot shops',
+  release_all: 'Release to everyone', release_paused: 'Paused a release',
+  pilot_on: 'Made a pilot shop', pilot_off: 'Removed from pilot',
 };
 
 export default function Activity() {

@@ -78,6 +78,7 @@ def _shop_row(shop: Shop, open_errors: int, now: datetime) -> dict:
         "device_linked": bool(shop.token_hash),
         "disabled": shop.disabled,
         "pending_licence_until": shop.pending_licence_until,
+        "pilot": bool(shop.pilot),
         "notes": shop.notes or "",
     }
 
@@ -198,6 +199,7 @@ def shop_detail(code: str, admin: AdminUser = Depends(current_admin), db: Sessio
 class ShopPatch(BaseModel):
     notes: str | None = Field(default=None, max_length=5000)
     disabled: bool | None = None
+    pilot: bool | None = None       # gets new releases first
 
 
 @router.patch("/shops/{code}")
@@ -209,6 +211,9 @@ def update_shop(code: str, body: ShopPatch, admin: AdminUser = Depends(current_a
     if body.disabled is not None and body.disabled != shop.disabled:
         shop.disabled = body.disabled
         _audit(db, admin, "disable" if body.disabled else "enable", shop)
+    if body.pilot is not None and body.pilot != shop.pilot:
+        shop.pilot = body.pilot
+        _audit(db, admin, "pilot_on" if body.pilot else "pilot_off", shop)
     db.commit()
     return {"ok": True}
 

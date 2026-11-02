@@ -53,7 +53,34 @@ log = logging.getLogger("curavo.cloud")
 
 
 def cloud_url() -> str:
-    return (os.environ.get("CURAVO_CLOUD_URL", DEFAULT_CLOUD_URL) or "").rstrip("/")
+    """
+    Where the Curavo cloud is, first match wins:
+      1. CURAVO_CLOUD_URL environment variable (developers)
+      2. a file cloud_url.txt in the data folder - one line, e.g.
+         http://192.168.1.20:8100 - so a TEST PC can be pointed at the test
+         cloud on Zahid's Mac without rebuilding anything
+      3. DEFAULT_CLOUD_URL (the real server, once it exists)
+    """
+    env = os.environ.get("CURAVO_CLOUD_URL")
+    if env is not None:
+        return env.strip().rstrip("/")
+    try:
+        f = get_app_data_dir() / "cloud_url.txt"
+        if f.exists():
+            line = f.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+            if line.startswith(("http://", "https://")):
+                return line.rstrip("/")
+    except (OSError, IndexError):
+        pass
+    return DEFAULT_CLOUD_URL.rstrip("/")
+
+
+def update_endpoint(base: str) -> str:
+    """
+    The address the desktop shell asks "is there a newer Curavo?".  The
+    {{...}} parts are filled in by the Tauri updater itself.
+    """
+    return f"{base}/updates/{{{{target}}}}/{{{{arch}}}}/{{{{current_version}}}}"
 
 
 def machine_fingerprint() -> str:

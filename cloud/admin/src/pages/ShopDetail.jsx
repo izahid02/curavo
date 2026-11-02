@@ -86,6 +86,14 @@ export default function ShopDetail({ onChanged }) {
           <SectionTitle>This PC</SectionTitle>
           <dl className="kv">
             <dt>App version</dt><dd>{s.app_version || '—'}</dd>
+            <dt>Pilot shop</dt>
+            <dd>
+              <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', cursor: 'pointer', fontWeight: 500 }}>
+                <input type="checkbox" checked={s.pilot} style={{ width: 'auto' }}
+                  onChange={(e) => act('', { pilot: e.target.checked }, e.target.checked ? 'Now a pilot shop - gets new versions first' : 'No longer a pilot shop')} />
+                Gets new versions first
+              </label>
+            </dd>
             <dt>System</dt><dd>{s.os_name || '—'}</dd>
             <dt>Last check-in</dt><dd>{when(s.last_seen_at)}</dd>
             <dt>Joined the cloud</dt><dd>{when(s.registered_at)}</dd>

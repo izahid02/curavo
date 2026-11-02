@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core window/event permissions plus permission to spawn the bundled hcc-backend sidecar.",
-  "windows": ["main"],
+  "description": "Core window/event permissions, permission to spawn the bundled hcc-backend sidecar, and the updater.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "shell:default",

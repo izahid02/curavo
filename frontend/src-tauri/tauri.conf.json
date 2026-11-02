@@ -30,7 +30,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "ARZ Technologies",
     "copyright": "Copyright 2026 ARZ Technologies",
     "shortDescription": "Curavo pharmacy management by ARZ Technologies",
@@ -42,7 +44,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["hcc-backend"],
+    "externalBin": [
+      "hcc-backend"
+    ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
@@ -53,7 +57,19 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English"]
+        "languages": [
+          "English"
+        ]
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDNDcwMEYwRDYyODBBNjAKUldSZ0Npalc4QUJIVE5yT2h3cVVFQUUyUmw4RU1Ga3EvendGWld5M2FkNnR2Tmo4OFd0Yk85c0YK",
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

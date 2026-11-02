@@ -5,6 +5,8 @@ The shop PC's link to the Curavo cloud, as the Backup page shows it.
                                check-in / cloud backup happen, what went wrong
   POST /api/cloud/backup-now   start a cloud backup now (Owner/Admin).  Returns
                                at once; the page polls /status to see it land.
+  GET  /api/cloud/update-info  where the desktop shell should look for app
+                               updates (frontend/src/lib/updater.jsx).
 
 The work itself is done by services/cloud_agent.py on its own thread.
 """
@@ -14,7 +16,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.services.auth_service import get_current_user
-from app.services.cloud_agent import agent, get_state
+from app.services import licence
+from app.services.cloud_agent import agent, get_state, update_endpoint
 
 router = APIRouter(prefix="/cloud", tags=["Cloud"])
 
@@ -53,3 +56,19 @@ def cloud_backup_now(current_user: User = Depends(get_current_user)):
         return {"started": False, "message": "A cloud backup is already running."}
     agent.run_in_background(force_backup=True)
     return {"started": True}
+
+
+@router.get("/update-info")
+def update_info(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """
+    The updater needs the cloud address and this shop's code (so the cloud
+    can offer a PILOT release to pilot shops first).  Nothing when the cloud
+    is switched off - then the app never looks for updates.
+    """
+    if not agent.enabled:
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "endpoint": update_endpoint(agent.url),
+        "shop_code": licence.get_state(db).shop_code,
+    }

@@ -7,6 +7,7 @@ import { usePharmacy } from '../lib/pharmacy.jsx';
 import { clearBrandingCache, loadBrandingImage } from '../lib/branding';
 import Icon from './shared/Icon';
 import { LicenceBanner, LicencePill, LicenceProvider, useLicence } from '../lib/licence.jsx';
+import { UpdateBanner } from '../lib/updater.jsx';
 /** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
  *  in backend/app/routers/settings.py — the backend enforces it either way. */
 const PHARMACY_SETTINGS_ROLES = ['Owner', 'Administrator'];
@@ -824,6 +825,9 @@ export default function Layout() {
 
         {/* Subscription warning - only when something needs doing */}
         <LicenceBanner />
+
+        {/* A new Curavo version, downloaded and verified (desktop app only) */}
+        <UpdateBanner role={profile?.role || user?.role_name} />
 
         {/* Page content */}
         <main style={{

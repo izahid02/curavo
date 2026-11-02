@@ -761,6 +761,29 @@ Current stock of a product = SUM(quantity_available) across
   The server and control panel live in cloud/ (see cloud/README.md).
   Guard: backend/scripts/test_cloud.py (shop + cloud in one process)
 
+**AN UPDATE NEVER INSTALLS IN THE MIDDLE OF A BILL - src-tauri/src/main.rs.**
+  The screens (lib/updater.jsx) ask the backend for the cloud address
+  (GET /api/cloud/update-info), then the Rust shell checks
+  {cloud}/updates/{{target}}/{{arch}}/{{current_version}}, downloads quietly and
+  VERIFIES ARZ'S UPDATE SIGNATURE (pubkey in tauri.conf.json; the secret half is
+  ~/Projects/ARZ-licence-keys/curavo_update_signing.key = GitHub secret
+  TAURI_SIGNING_PRIVATE_KEY).  It installs only when Curavo is CLOSED (no
+  reopen) or on "Install now" (Owner/Admin; reopens).  The backend sidecar is
+  killed first so Windows can replace hcc-backend.exe; the start-up backup then
+  runs on the new version before any migration.
+  The cloud decides who gets what (cloud/server/curavo_cloud/routers/updates.py):
+  a release starts PILOT (pilot shops only) -> ALL -> or PAUSED; a shop is only
+  ever offered something NEWER (requireSignedVersion also blocks a downgrade
+  with an old, genuinely signed installer).
+  ONE version number: the GitHub workflow writes the tag's version into
+  tauri.conf.json, package.json and backend/app/version.py.  If they ever
+  disagree a shop is offered the update it already has, forever.
+  A workflow_dispatch "test_build" may fetch updates over plain http (a test
+  cloud on a Mac).  Never give a test build to a shop.
+  Windows code-signing ("Unknown publisher") is separate and not set up yet:
+  it needs a paid certificate; it will go in bundle.windows.signCommand.
+  Guard: backend/scripts/test_updates.py
+
 ---
 
 ## 5. Design system (glassmorphism — do not change without asking)

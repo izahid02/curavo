@@ -13,6 +13,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
+# Auto-update: checks the Curavo cloud, verifies the ARZ update signature,
+# downloads quietly and installs when Curavo closes (or on "Install now").
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
