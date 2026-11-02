@@ -1,0 +1,377 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --accent:        #6366f1;
+  --accent-dark:   #4f46e5;
+  --accent-light:  rgba(99,102,241,0.12);
+  --accent-border: rgba(99,102,241,0.25);
+
+  --glass:         rgba(255,255,255,0.50);
+  --glass-strong:  rgba(255,255,255,0.70);
+  --glass-border:  rgba(255,255,255,0.75);
+  --glass-hover:   rgba(255,255,255,0.65);
+
+  --text:          #1e1b4b;
+  /* Darkened Nov 2026 (Curavo refresh): the old #6b7280 / #9ca3af greys
+     were hard to read on frosted glass, especially small labels.  These two
+     pass WCAG AA contrast on the glass cards. */
+  --text-secondary:#4b5563;
+  --text-hint:     #6b7280;
+
+  --ok:            #059669;
+  --ok-bg:         rgba(16,185,129,0.12);
+  --warn:          #d97706;
+  --warn-bg:       rgba(245,158,11,0.12);
+  --danger:        #e11d48;
+  --danger-bg:     rgba(244,63,94,0.12);
+  --info:          #0284c7;
+  --info-bg:       rgba(14,165,233,0.12);
+
+  --font-body:     'Outfit', system-ui, sans-serif;
+  --radius:        10px;
+  --radius-lg:     14px;
+  --radius-xl:     18px;
+
+  /* Backward-compat aliases so existing page files keep working */
+  --brand:         var(--accent);
+  --brand-dark:    var(--accent-dark);
+  --brand-light:   var(--accent-light);
+  --surface:       var(--glass-strong);
+  --bg:            rgba(255,255,255,0.50);
+  --border:        rgba(0,0,0,0.06);
+  --text-muted:    var(--text-secondary);
+  --shadow:        0 4px 20px rgba(99,102,241,0.06);
+  --shadow-md:     0 4px 24px rgba(99,102,241,0.10);
+  --font-display:  var(--font-body);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-body);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* Every digit the same width, so prices and quantities line up in columns
+     on bills, tables and reports. */
+  font-variant-numeric: tabular-nums;
+  min-height: 100vh;
+  background: linear-gradient(145deg,
+    #e8f4fd 0%, #dbeeff 25%,
+    #ede9fe 55%, #fce7f3 80%,
+    #e0f2fe 100%);
+  background-attachment: fixed;
+}
+
+/* Animated background orbs */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 280px 280px at 10% -10%, rgba(165,180,252,0.45) 0%, transparent 70%),
+    radial-gradient(ellipse 200px 200px at 90% 90%, rgba(125,211,252,0.40) 0%, transparent 70%),
+    radial-gradient(ellipse 150px 150px at 60% 50%, rgba(249,168,212,0.35) 0%, transparent 70%),
+    radial-gradient(ellipse 120px 120px at 20% 75%, rgba(110,231,183,0.35) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+  animation: orbShift 12s ease-in-out infinite alternate;
+}
+
+@keyframes orbShift {
+  0%   { opacity: 0.8; transform: scale(1) translateY(0px); }
+  100% { opacity: 1;   transform: scale(1.08) translateY(-15px); }
+}
+
+/* ── Glass utilities ─────────────────────────────────────────── */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+}
+.glass-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid var(--glass-border);
+}
+.card {
+  background: var(--glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 24px rgba(99,102,241,0.06);
+  padding: 20px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius);
+  padding: 9px 18px;
+  font-weight: 500;
+  font-size: 13.5px;
+  transition: all 0.18s;
+}
+button:active { transform: translateY(1px); }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(99,102,241,0.35);
+}
+.btn-primary:hover {
+  background: var(--accent-dark);
+  box-shadow: 0 6px 18px rgba(99,102,241,0.45);
+}
+
+.btn-secondary {
+  background: var(--glass-strong);
+  color: var(--text-secondary);
+  border: 1px solid rgba(0,0,0,0.08);
+}
+.btn-secondary:hover {
+  background: rgba(255,255,255,0.9);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid rgba(225,29,72,0.2);
+}
+
+/* ── Inputs ──────────────────────────────────────────────────── */
+input, select, textarea {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  padding: 9px 13px;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.65);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  width: 100%;
+  transition: all 0.18s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(255,255,255,0.85);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+}
+input::placeholder, textarea::placeholder { color: var(--text-hint); }
+
+/* Narrow number boxes — e.g. the "5 + 1" scheme pair, or a discount % —
+   have no room for the browser's built-in up/down spinner: the arrows sit on
+   top of the digits and the field reads as broken.  This class removes the
+   spinner so the box is just a clean number field; typing and validation are
+   unaffected.  (Used by the Bulk Add Stock cards in Inventory.jsx.) */
+input.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input.no-spinner::-webkit-outer-spin-button,
+input.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ── Badges ──────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.badge-ok     { background: var(--ok-bg);     color: var(--ok); }
+.badge-warn   { background: var(--warn-bg);   color: var(--warn); }
+.badge-danger { background: var(--danger-bg); color: var(--danger); }
+.badge-info   { background: var(--info-bg);   color: var(--info); }
+.badge-accent { background: var(--accent-light); color: var(--accent); }
+.badge-neutral {
+  background: rgba(0,0,0,0.05);
+  color: var(--text-secondary);
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+/* ── Tables ──────────────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-hint);
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: transparent;
+}
+tbody tr {
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+  transition: background 0.15s;
+  cursor: pointer;
+}
+tbody tr:hover { background: rgba(255,255,255,0.5); }
+tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
+
+/* ── Sidebar nav items (used by Layout.jsx via className) ──────── */
+/* THE SIDEBAR NAV MUST NEVER SCROLL — it COMPRESSES instead.
+   There are twelve nav items plus five section labels, which at a fixed 8px of
+   vertical padding each needed ~770px of sidebar. On a 768px laptop the last
+   item (Reports) fell off the bottom, and the nav's own scrollbar hid it.
+   Two rules fix that here:
+     1. clamp() ties the vertical padding to the viewport HEIGHT — 8px on a tall
+        screen, shrinking to 4px on a short one, which alone claws back ~50px.
+        Horizontal padding stays fixed; the sidebar is always 220px wide.
+     2. min-height: 0 lets the item shrink further if even that is not enough.
+        A flex item in a column has min-height: auto by default, meaning it
+        refuses to shrink below its content — which is what made the nav
+        overflow (and therefore scroll) rather than tighten up. overflow: hidden
+        keeps a squeezed item's text inside its own box instead of spilling over
+        the ARZ logo pinned below it. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: clamp(4px, 0.95vh, 10px) 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: all 0.18s;
+  cursor: pointer;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Keep every icon a fixed 18×18 box so it never squishes or misaligns
+   when the label text is long. */
+.nav-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.nav-item:hover { background: rgba(255,255,255,0.6); color: #1e1b4b; }
+/* Active page: a solid indigo pill (Curavo refresh) — it reads at a glance
+   from across the counter, where the old pale tint did not. */
+.nav-item-active {
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 10px;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(99,102,241,0.32);
+}
+.nav-item-active:hover { background: var(--accent-dark); color: #ffffff; }
+/* Count badge on a nav row (expiry / follow-ups / credit).  Amber: "look at
+   this", not "error" — red is kept for things that are actually wrong. */
+.nav-badge {
+  margin-left: auto;
+  background: #f59e0b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 3px 7px;
+}
+/* Icon inherits the indigo active colour via currentColor stroke. */
+.nav-item-active svg { stroke: currentColor; }
+
+/* ── Animations ──────────────────────────────────────────────── */
+/* Row-title link: a table cell whose text opens a detail panel (e.g. the
+   medicine name in the Medicines table).  It has to look like plain text at
+   rest — a table full of underlined blue links is unreadable — and only reveal
+   itself as clickable on hover.  A :hover rule needs real CSS, which inline
+   styles cannot express, so it lives here. */
+.row-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-link:hover,
+.row-link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.4s ease both; }
+
+/* Gentle entrance for sections that appear conditionally (e.g. the billing
+   home-visit charge, shown only when a drip/injection is in the bill). */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(99,102,241,0.35); }
+  50%       { box-shadow: 0 4px 28px rgba(99,102,241,0.55); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.6s linear infinite; }
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+   Dashboard stat grid — exactly 4 cards per row (2 rows of 4 = 8 cards).
+
+   This lives in CSS rather than as an inline style on the div because inline
+   styles cannot carry media queries, and a hard 4-column grid would squash the
+   cards unreadably on a small laptop.  The pharmacy PC is 1280px or wider, so
+   4-up is the normal case; the two fallbacks below only kick in on narrower
+   screens.  `align-items: stretch` (the grid default, stated here so it is
+   obvious) is what lets each card's height: 100% fill the row evenly.
+--------------------------------------------------------------------------- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  /* 1fr rows: both rows take the height of the tallest card anywhere in the
+     grid, so all 8 cards end up identical rather than merely equal within
+     their own row.  Without this the top row sits ~10px taller than the
+     bottom one, because the patients footer is deeper than the spend pills. */
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 620px) {
+  .stats-grid { grid-template-columns: 1fr; }
+}
+
+/* Camera scanner: animated green line that sweeps the viewfinder */
+@keyframes scanLine {
+  0%   { top: 0%;   opacity: 1; }
+  48%  { opacity: 1; }
+  50%  { top: calc(100% - 2px); opacity: 0.3; }
+  52%  { opacity: 1; }
+  100% { top: 0%;   opacity: 1; }
+}

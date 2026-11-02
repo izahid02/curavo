@@ -739,6 +739,28 @@ Current stock of a product = SUM(quantity_available) across
   The frontend never computes dates: lib/licence.jsx shows what the server says.
   Guard: backend/scripts/test_licence.py
 
+**THE CURAVO CLOUD MUST NEVER GET IN THE WAY OF THE SHOP - services/cloud_agent.py.**
+  A background thread (never inside a request) checks in every 15 minutes,
+  uploads ONE locked backup a day (IST), sends error reports and activates a
+  licence key the control panel queued.  Every failure is caught and written to
+  cloud_state.last_error in plain ASCII; it is retried next round.  Billing never
+  waits for it.  Switched off entirely while CURAVO_CLOUD_URL /
+  DEFAULT_CLOUD_URL is empty (true until the production server exists).
+  ⚠ A BACKUP IS LOCKED ON THE PC BEFORE UPLOAD (services/backup_crypto.py):
+  AES-256-GCM; its data key wrapped for ARZ (X25519 recovery key - secret half
+  only on Zahid's Mac, next to the licence key) and for the shop (its own key in
+  cloud_state).  The server only ever stores *.cbk files it cannot open.  Never
+  add a code path that uploads an unlocked database or puts patient data in the
+  readable header.  Unlock with tools/cloud/curavo_recovery.py.
+  The snapshot uses sqlite3's backup API (the WAL rule above) and includes
+  branding/ (logo + signature).
+  Errors: services/error_reports.py groups crashes by fingerprint (type + code
+  location + route with numbers -> N), queues them off the request thread, and
+  the agent sends only the NEW count.  Screens report via
+  frontend/src/lib/errorReporter.js -> POST /api/diagnostics/client-error.
+  The server and control panel live in cloud/ (see cloud/README.md).
+  Guard: backend/scripts/test_cloud.py (shop + cloud in one process)
+
 ---
 
 ## 5. Design system (glassmorphism — do not change without asking)
@@ -927,6 +949,15 @@ DELETE /api/backup/{file}           → delete one
   endpoint needs the JWT and a bare link cannot carry the header (401).
   Snapshots use sqlite3's online backup API, never copy2 — see the WAL rule
   in §4 for why that is not a style preference.
+
+### Cloud link (shop side)
+GET    /api/cloud/status            → {enabled:false} or registered, busy,
+                                      last_contact_at/_ok, last_backup_at/_size,
+                                      last_error.  Any logged-in user.
+POST   /api/cloud/backup-now        → 202; starts a round with a forced backup
+                                      (Owner/Administrator).
+POST   /api/diagnostics/client-error → 204; a screen's crash.  No login, size-
+                                      capped, 30/minute.
 
 ### Licence (Curavo subscription)
 GET    /api/licence/status          → state TRIAL|ACTIVE|GRACE|EXPIRED, restricted,

@@ -36,6 +36,12 @@ frontend/src-tauri/hcc-backend-*
 .env
 *.env.local
 
+# --- Curavo cloud ----------------------------------------------------------
+cloud/admin/node_modules/
+cloud/admin/dist/
+cloud/server/cloud-data/
+*.cbk
+
 # --- Curavo licence signing key -------------------------------------------
 # ARZ's PRIVATE key makes licence keys.  It lives OUTSIDE this repo
 # (~/Projects/ARZ-licence-keys).  These lines are a safety net in case a copy

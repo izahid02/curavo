@@ -215,6 +215,9 @@ def init_db():
     # Curavo subscription state (trial start, shop code, licence key).  A new
     # TABLE, so it also arrives through create_all().
     import app.models.licence            # noqa: F401
+    # Link to the Curavo cloud (device token, backup key) and the queue of
+    # error reports waiting to be sent.  New TABLES, created here.
+    import app.models.cloud              # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

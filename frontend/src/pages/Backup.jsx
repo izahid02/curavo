@@ -164,6 +164,9 @@ export default function Backup() {
         </div>
       )}
 
+      {/* ── Curavo cloud (only when switched on for this PC) ──────── */}
+      <CloudBackupCard />
+
       {/* ── Where the files are ───────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16, animation: 'fadeUp 0.4s ease' }}>
         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-hint)', marginBottom: 6 }}>
@@ -281,6 +284,78 @@ export default function Backup() {
         </div>,
         document.body,
       )}
+    </div>
+  );
+}
+
+
+/**
+ * The Curavo cloud copy: one LOCKED backup a day, taken by the cloud helper
+ * (backend/app/services/cloud_agent.py).  Hidden entirely when the cloud is
+ * not switched on for this PC.  "Back up to cloud now" starts one at once and
+ * this card checks back every few seconds until it lands.
+ */
+function CloudBackupCard() {
+  const [st, setSt] = useState(null);
+  const [msg, setMsg] = useState('');
+
+  const load = useCallback(() => api.get('/cloud/status').then(({ data }) => setSt(data)).catch(() => {}), []);
+
+  useEffect(() => { load(); }, [load]);
+  // While a cloud backup is running, look again every 3 seconds.
+  useEffect(() => {
+    if (!st?.busy) return undefined;
+    const t = setTimeout(load, 3000);
+    return () => clearTimeout(t);
+  }, [st, load]);
+
+  if (!st?.enabled) return null;
+
+  async function backUpNow() {
+    setMsg('');
+    try {
+      const { data } = await api.post('/cloud/backup-now');
+      if (!data.started) setMsg(data.message || '');
+      setSt((s) => ({ ...s, busy: true }));
+      setTimeout(load, 1500);
+    } catch (err) {
+      setMsg(err.response?.data?.detail || 'Could not start a cloud backup.');
+    }
+  }
+
+  const today = new Date().toDateString();
+  const last = st.last_backup_at ? new Date(st.last_backup_at) : null;
+  const doneToday = last && last.toDateString() === today;
+  const failing = st.last_contact_ok === false;
+  const tone = failing ? 'var(--danger)' : doneToday ? 'var(--ok)' : 'var(--warn)';
+  const headline = st.busy ? 'Backing up to the Curavo cloud…'
+    : failing ? 'Could not reach the Curavo cloud'
+    : doneToday ? 'Safe in the Curavo cloud'
+    : 'Not yet backed up to the cloud today';
+
+  return (
+    <div className="card" style={{ marginBottom: 16, animation: 'fadeUp 0.4s ease', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-hint)', marginBottom: 6 }}>
+          Cloud backup
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: tone, flexShrink: 0 }} />
+          {headline}
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.6 }}>
+          {last ? `Last cloud backup: ${formatWhen(st.last_backup_at)}` : 'No cloud backup yet.'}
+          {failing && st.last_error ? ` · ${st.last_error} It will try again by itself.` : ''}
+          <br />
+          One backup a day goes to the cloud automatically. It is locked on this
+          PC before it leaves, so only this shop and ARZ Solutions can open it.
+          Billing never waits for it.
+        </div>
+        {msg && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 6 }}>{msg}</div>}
+      </div>
+      <button className="btn-secondary" onClick={backUpNow} disabled={st.busy}>
+        {st.busy ? 'Backing up…' : 'Back up to cloud now'}
+      </button>
     </div>
   );
 }

@@ -46,6 +46,8 @@ from app.routers import supplier_credit as supplier_credit_router
 from app.routers import settings as settings_router
 from app.routers import backup as backup_router
 from app.routers import licence as licence_router
+from app.routers import cloud as cloud_router
+from app.routers import diagnostics as diagnostics_router
 from app.routers import regulated as regulated_router
 
 
@@ -1105,8 +1107,15 @@ async def lifespan(_app: FastAPI):
 
     # Start the credit reminder background task
     task = asyncio.create_task(_daily_credit_reminders_task())
+
+    # The Curavo cloud helper (check-ins, daily locked backup, error reports).
+    # Its own thread; does nothing at all when no cloud URL is configured.
+    from app.services.cloud_agent import agent as cloud_agent
+    cloud_agent.start()
+
     yield   # the application runs here
     task.cancel()  # clean shutdown — stop the background loop
+    cloud_agent.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -1207,6 +1216,29 @@ app.include_router(backup_router.router, prefix="/api")
 # Curavo subscription: GET /api/licence/status, POST /api/licence/activate.
 # The rules (30-day trial, 15-day grace, what pauses) are in services/licence.py.
 app.include_router(licence_router.router, prefix="/api")
+
+# Curavo cloud link: GET /api/cloud/status, POST /api/cloud/backup-now.
+app.include_router(cloud_router.router, prefix="/api")
+# Screens report their own crashes: POST /api/diagnostics/client-error.
+app.include_router(diagnostics_router.router, prefix="/api")
+
+
+# ---------------------------------------------------------------------------
+# Error reports (services/error_reports.py)
+# ---------------------------------------------------------------------------
+# Any request that crashes is noted for the ARZ control panel before the
+# usual 500 reply goes back.  ERROR-level log lines are noted too.
+from fastapi import Request as _Request                      # noqa: E402
+from fastapi.responses import JSONResponse as _JSONResponse  # noqa: E402
+from app.services import error_reports as _error_reports      # noqa: E402
+
+_error_reports.install_log_handler()
+
+
+@app.exception_handler(Exception)
+async def _report_unhandled(request: _Request, exc: Exception):
+    _error_reports.record_exception(exc, "backend", f"{request.method} {request.url.path}")
+    return _JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 # Schedule H1 / MTP register: which medicines belong in it
 # (/api/regulated/candidates, /apply, /check) and the medicines with no

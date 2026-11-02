@@ -5,6 +5,10 @@ import App from './App.jsx'
 import { PharmacyProvider } from './lib/pharmacy.jsx'
 import './styles/global.css'
 import './styles/print.css'
+import { installErrorReporter } from './lib/errorReporter'
+
+// Screen crashes are reported to ARZ (see lib/errorReporter.js).
+installErrorReporter();
 
 // This is where React "starts" and attaches to the page.
 //
