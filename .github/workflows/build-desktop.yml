@@ -9,9 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (e.g. 0.1.0-beta)'
+        description: 'Version to build (e.g. 0.3.0 or 0.3.0-beta.1)'
         required: true
-        default: '0.1.0-beta'
+        default: '0.3.0-beta.1'
+      test_build:
+        description: 'TEST build: may fetch updates over plain http (a test cloud on a Mac). Never give one to a shop.'
+        type: boolean
+        default: false
 
 jobs:
   build-windows:
@@ -27,6 +31,29 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # ONE version number everywhere.  It comes from the tag (v0.3.0 -> 0.3.0)
+      # or the version typed when running by hand, and is written into the
+      # three places that report it: the installer/updater (tauri.conf.json),
+      # the screens (package.json) and the engine (backend/app/version.py -
+      # what each shop reports to the control panel).  If these disagreed, a
+      # shop would be offered the update it already has, forever.
+      - name: Set version
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.version }}" }
+          $v = $v.TrimStart("v")
+          if ($v -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "Bad version '$v'" }
+          "CURAVO_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $c = Get-Content frontend/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $c.version = $v
+          $c | ConvertTo-Json -Depth 32 | Set-Content frontend/src-tauri/tauri.conf.json -Encoding utf8
+          $p = Get-Content frontend/package.json -Raw | ConvertFrom-Json
+          $p.version = $v
+          $p | ConvertTo-Json -Depth 32 | Set-Content frontend/package.json -Encoding utf8
+          (Get-Content backend/app/version.py -Raw) -replace 'VERSION = "[^"]*"', "VERSION = `"$v`"" |
+            Set-Content backend/app/version.py -Encoding utf8 -NoNewline
+          Write-Host "Building Curavo $v"
 
       # --- Backend: freeze FastAPI into hcc-backend.exe with PyInstaller -----
       - name: Set up Python 3.11
@@ -82,21 +109,74 @@ jobs:
         with:
           workspaces: frontend/src-tauri
 
+      # THE UPDATE SIGNATURE.  Every installer is signed with ARZ's UPDATE key
+      # (secret TAURI_SIGNING_PRIVATE_KEY = the contents of
+      # ~/Projects/ARZ-licence-keys/curavo_update_signing.key).  A shop's
+      # Curavo refuses any update without it.  This makes the extra
+      # Curavo_X.Y.Z_x64-setup.exe.sig file next to the installer.
+      # Until the secret is added the build still works, just without the
+      # .sig - such a build can be installed by hand but never auto-updates.
+      #
+      # WINDOWS CODE-SIGNING ("Unknown publisher") is a DIFFERENT thing and is
+      # not set up yet - it needs a paid certificate.  When one is bought, its
+      # provider's signing tool goes into bundle.windows.signCommand in
+      # tauri.conf.json (added through --config here), and nothing else changes.
       - name: Build Tauri app (Windows installer)
         working-directory: frontend
+        shell: pwsh
         env:
-          # No code-signing key for the beta — Tauri skips the signing step.
-          TAURI_SIGNING_PRIVATE_KEY: ''
-        run: npx tauri build --target x86_64-pc-windows-msvc
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $cfg = @{}
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            Write-Host "::warning::No TAURI_SIGNING_PRIVATE_KEY secret - building WITHOUT the update signature."
+            $cfg.bundle = @{ createUpdaterArtifacts = $false }
+          }
+          if ("${{ inputs.test_build }}" -eq "true") {
+            Write-Host "::warning::TEST build - updates allowed over plain http. Never give this to a shop."
+            $cfg.plugins = @{ updater = @{ dangerousInsecureTransportProtocol = $true } }
+          }
+          if ($cfg.Count -gt 0) {
+            $cfg | ConvertTo-Json -Depth 8 -Compress | Set-Content tauri-overrides.json -Encoding utf8
+            npx tauri build --target x86_64-pc-windows-msvc --config tauri-overrides.json
+          } else {
+            npx tauri build --target x86_64-pc-windows-msvc
+          }
 
       # --- Publish -----------------------------------------------------------
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Curavo-Windows-${{ github.ref_name }}
+          name: Curavo-Windows-${{ env.CURAVO_VERSION }}
           path: |
             frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
           retention-days: 30
+
+      # Hand the new version to the Curavo cloud, which offers it to PILOT
+      # shops first (ARZ moves it to everyone from Curavo Control -> App
+      # updates).  Skipped until the cloud exists: needs the secrets
+      # CURAVO_CLOUD_URL (e.g. https://cloud.curavo.in) and CURAVO_RELEASE_TOKEN
+      # (the same value the server was started with).  A test build is never
+      # published.
+      - name: Publish to the Curavo cloud
+        if: ${{ inputs.test_build != true }}
+        shell: pwsh
+        env:
+          CLOUD: ${{ secrets.CURAVO_CLOUD_URL }}
+          TOKEN: ${{ secrets.CURAVO_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:CLOUD -or -not $env:TOKEN) { Write-Host "Cloud not configured - skipping."; exit 0 }
+          $dir = "frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          $exe = Get-ChildItem "$dir/*-setup.exe" | Select-Object -First 1
+          $sig = "$($exe.FullName).sig"
+          if (-not (Test-Path $sig)) { throw "No .sig file - add the TAURI_SIGNING_PRIVATE_KEY secret first." }
+          curl.exe --fail-with-body -sS -X POST "$env:CLOUD/admin/api/releases" `
+            -H "X-Release-Token: $env:TOKEN" `
+            -F "installer=@$($exe.FullName)" `
+            -F "signature=<$sig" `
+            -F "notes=Curavo $env:CURAVO_VERSION"
 
       # The Release step talks to the GitHub API, which is the one part of this
       # job that depends on a service outside the runner.  When it is slow or
@@ -121,6 +201,7 @@ jobs:
             Powered by ARZ Technologies
           files: |
             frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
           draft: false
           prerelease: ${{ contains(github.ref_name, 'beta') }}
           fail_on_unmatched_files: false
