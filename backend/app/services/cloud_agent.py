@@ -44,6 +44,10 @@ from app.version import VERSION
 DEFAULT_CLOUD_URL = ""
 
 ROUND_SECONDS = 15 * 60
+# With an owner phone connected, rounds run every 5 minutes so the phone's
+# figures are never more than ~5 minutes old.  (Backups stay once a day.)
+OWNER_ROUND_SECONDS = 5 * 60
+OWNER_PUSH_HOUR_IST = 9      # the morning "needs attention" notification
 FIRST_ROUND_DELAY = 60
 TIMEOUT = 30
 UPLOAD_TIMEOUT = 600
@@ -174,6 +178,15 @@ class CloudAgent:
                                                  "serial", "restricted")},
             "health": self._health(db, state),
         })
+        # Phones the owner unlinked from the phone itself: forget them here too,
+        # so nothing more is locked for them.
+        active = (reply or {}).get("owner_devices")
+        if isinstance(active, list):
+            from app.models.cloud import OwnerDevice
+            for d in db.query(OwnerDevice).all():
+                if d.device_id not in active:
+                    db.delete(d)
+            db.commit()
         key = (reply or {}).get("licence_key")
         if key:
             try:
@@ -224,6 +237,44 @@ class CloudAgent:
         self._call("POST", "/agent/v1/errors", state=state, shop_code=shop_code,
                    payload={"errors": [r.as_payload() for r in batch]})
         error_reports.mark_sent(db, batch)
+
+    # ------------------------------------------------------------ owner app
+
+    def _send_owner_summary(self, db, state, shop_code, shop_name):
+        """Lock a fresh summary for the connected phones and leave it at the cloud."""
+        from app.models.cloud import OwnerDevice
+        from app.services import owner_app
+        devices = db.query(OwnerDevice).all()
+        if not devices:
+            return
+        summary = owner_app.build_summary(db)
+        payload = {"locked": owner_app.lock_summary(summary, devices),
+                   "device_ids": [d.device_id for d in devices]}
+        now_ist = datetime.now(IST)
+        if (not summary.get("restricted") and now_ist.hour >= OWNER_PUSH_HOUR_IST
+                and state.owner_push_on != now_ist.date()):
+            note = owner_app.push_text(shop_name, owner_app.attention_counts(summary))
+            if note:
+                payload["push"] = note
+            state.owner_push_on = now_ist.date()
+        self._call("POST", "/agent/v1/owner-summary", state=state, shop_code=shop_code, payload=payload)
+        state.owner_summary_at = datetime.utcnow()
+        db.commit()
+
+    def owner_call(self, method, path, payload=None):
+        """For the Connect-phone screen: one direct call, in the request."""
+        if not self.enabled:
+            raise CloudError("The Curavo cloud is not switched on for this PC.")
+        db = self.session_factory()
+        try:
+            state = get_state(db)
+            if not state.device_token:
+                raise CloudError("This PC has not joined the Curavo cloud yet. Try again in a few minutes.")
+            code = licence.get_state(db).shop_code
+            _, data = self._call(method, path, state=state, shop_code=code, payload=payload, timeout=15)
+            return data
+        finally:
+            db.close()
 
     def backup_due(self, state) -> bool:
         if not state.last_backup_at:
@@ -291,6 +342,7 @@ class CloudAgent:
                 self._register(db, state, shop_code, shop_name)
             self._heartbeat(db, state, shop_code, shop_name)
             self._flush_errors(db, state, shop_code)
+            self._send_owner_summary(db, state, shop_code, shop_name)
             if force_backup or self.backup_due(state):
                 self._upload_backup(db, state, shop_code)
 
@@ -343,7 +395,18 @@ class CloudAgent:
             return
         while not self._stop.is_set():
             self.run_once()
-            self._stop.wait(ROUND_SECONDS)
+            self._stop.wait(OWNER_ROUND_SECONDS if self._has_owner_phone() else ROUND_SECONDS)
+
+    def _has_owner_phone(self) -> bool:
+        try:
+            from app.models.cloud import OwnerDevice
+            db = self.session_factory()
+            try:
+                return db.query(OwnerDevice).count() > 0
+            finally:
+                db.close()
+        except Exception:
+            return False
 
     def run_in_background(self, force_backup=False):
         """For the "Back up to cloud now" button: returns at once."""

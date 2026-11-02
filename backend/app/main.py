@@ -48,6 +48,7 @@ from app.routers import backup as backup_router
 from app.routers import licence as licence_router
 from app.routers import cloud as cloud_router
 from app.routers import diagnostics as diagnostics_router
+from app.routers import owner_app as owner_app_router
 from app.routers import regulated as regulated_router
 
 
@@ -496,6 +497,11 @@ def _run_db_migrations() -> None:
         # services/doc_numbers.py then continues the shop's own series (read
         # from its last invoice), so an upgrade never changes a shop's numbers.
         "ALTER TABLE pharmacy_settings ADD COLUMN invoice_prefix VARCHAR(8)",
+        # Owner app (Nov 2026): the day the morning "needs attention" phone
+        # notification was last sent, so it goes out at most once a day even
+        # if Curavo is restarted.
+        "ALTER TABLE cloud_state ADD COLUMN owner_summary_at DATETIME",
+        "ALTER TABLE cloud_state ADD COLUMN owner_push_on DATE",
     ]
 
     db = SessionLocal()
@@ -1221,6 +1227,8 @@ app.include_router(licence_router.router, prefix="/api")
 app.include_router(cloud_router.router, prefix="/api")
 # Screens report their own crashes: POST /api/diagnostics/client-error.
 app.include_router(diagnostics_router.router, prefix="/api")
+# Owner app on the phone: connect / list / remove phones.
+app.include_router(owner_app_router.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------

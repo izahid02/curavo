@@ -29,7 +29,8 @@ from sqlalchemy.orm import Session
 
 from curavo_cloud import storage
 from curavo_cloud.db import get_db
-from curavo_cloud.models import AdminAudit, AdminUser, Backup, ErrorGroup, Heartbeat, Lead, Shop
+from curavo_cloud.models import (AdminAudit, AdminUser, Backup, ErrorGroup, Heartbeat, Lead, MobileDevice,
+                                 OwnerSummary, Shop)
 from curavo_cloud.routers.agent import peek_licence
 from curavo_cloud.security import check_password, current_admin, hash_password, make_admin_token
 
@@ -194,6 +195,14 @@ def shop_detail(code: str, admin: AdminUser = Depends(current_admin), db: Sessio
                      "size": b.size, "app_version": b.app_version, "sha256": b.sha256} for b in backups],
         "errors": [_error_row(e, shop) for e in errors],
         "heartbeats": [{"at": _iso(h.at), "app_version": h.app_version} for h in beats],
+        # Owner app: which phones, and when the PC last left figures for them.
+        # The figures themselves are locked for the phones - not readable here.
+        "phones": [{"name": d.name, "status": d.status, "connected_at": _iso(d.created_at),
+                    "last_seen_at": _iso(d.last_seen_at), "push": bool(d.push_token)}
+                   for d in db.query(MobileDevice).filter(MobileDevice.shop_id == shop.id,
+                                                          MobileDevice.status != "REMOVED")
+                   .order_by(MobileDevice.created_at).all()],
+        "owner_summary_at": _iso(getattr(db.get(OwnerSummary, shop.id), "updated_at", None)),
     }
 
 

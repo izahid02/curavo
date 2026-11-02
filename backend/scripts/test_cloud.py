@@ -204,6 +204,10 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app, raise_server_exception
             "stack": "TypeError: x\n    at lineCalc (http://h/assets/a.js:1:2)\n    at Billing (http://h/assets/a.js:3:4)"})
     logging.getLogger("app.test").error("A background task failed")
     error_reports.flush()
+    # An earlier "Back up now" round may still be running in the background;
+    # wait for it, or this round is skipped (the lock) and the test races it.
+    with agent._lock:
+        pass
     agent.run_once()
     errs = cloud.get("/admin/api/errors", headers=A).json()
     by_kind = {e["kind"]: e for e in errs}

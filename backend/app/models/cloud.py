@@ -16,7 +16,7 @@ the same shop - same device link, same backup key - with nothing to set up.
 
 A brand-new TABLE, so database.init_db() creates it - no ALTER needed.
 """
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Integer, String, Text
 
 from app.database import Base
 
@@ -34,6 +34,9 @@ class CloudState(Base):
     last_backup_size  = Column(BigInteger, nullable=True)
     last_error        = Column(Text, nullable=True)
     last_error_at     = Column(DateTime, nullable=True)
+    # Owner app: last summary sent, and the day the morning notification went.
+    owner_summary_at  = Column(DateTime, nullable=True)
+    owner_push_on     = Column(Date, nullable=True)
 
 
 class ErrorReport(Base):
@@ -59,3 +62,39 @@ class ErrorReport(Base):
     sent_count  = Column(Integer, default=0, nullable=False)
     first_seen  = Column(DateTime)
     last_seen   = Column(DateTime)
+
+
+class OwnerDevice(Base):
+    """
+    A phone connected to the owner app (frontend: Connect phone).
+
+    public_key is the phone's own X25519 key: every summary sent to the cloud
+    is locked so that only the phones listed here can open it.  Removing a row
+    stops that phone from reading anything sent afterwards.
+    """
+    __tablename__ = "owner_devices"
+
+    id          = Column(Integer, primary_key=True)
+    device_id   = Column(String(40), unique=True, nullable=False)   # given by the cloud
+    name        = Column(String(80))
+    public_key  = Column(String(64), nullable=False)
+    added_at    = Column(DateTime)
+
+
+class OwnerPairing(Base):
+    """
+    A "Connect phone" QR code waiting to be scanned (valid 10 minutes).
+
+    secret travels only inside the QR code shown on this PC's screen.  A phone
+    proves it scanned the code by sending HMAC(secret, its public key); the
+    cloud never sees the secret, so it cannot pair a phone on its own.
+    """
+    __tablename__ = "owner_pairings"
+
+    id          = Column(Integer, primary_key=True)
+    pairing_id  = Column(String(40), unique=True, nullable=False)
+    secret      = Column(String(64), nullable=False)
+    created_at  = Column(DateTime)
+    expires_at  = Column(DateTime)
+    status      = Column(String(12), default="OPEN")    # OPEN / DONE / EXPIRED / FAILED
+    device_name = Column(String(80))

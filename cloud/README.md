@@ -61,3 +61,13 @@ is closed. The website's Download button can point at `/download/windows` (newes
    Until then the cloud helper is switched off in every shop and nothing changes for them.
 
 Guard test (runs shop + cloud together, no network): `python backend/scripts/test_cloud.py`
+
+## Owner app relay (routers/owner.py)
+
+The cloud passes LOCKED owner-app summaries from shop PCs to the owner's
+phones, and relays the "Connect phone" handshake.  It can read neither the
+summaries nor the pairing secret.  Phones sign in with their own token
+(`X-Device-Id` + `Authorization: Bearer`) under `/mobile/v1/`.  The morning
+notification goes out through Expo's push service (`push.py`); its text is
+decided by the shop PC and carries counts only.  The panel's shop page lists
+the connected phones.

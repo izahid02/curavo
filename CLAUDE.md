@@ -784,6 +784,29 @@ Current stock of a product = SUM(quantity_available) across
   it needs a paid certificate; it will go in bundle.windows.signCommand.
   Guard: backend/scripts/test_updates.py
 
+**THE OWNER APP'S FIGURES ARE LOCKED FOR THE OWNER'S PHONES ONLY - services/owner_app.py.**
+  Decided Nov 2026: unlike backups (ARZ can open those, to restore a shop),
+  nobody but the phones the shop PC approved can read a shop's sales - not the
+  cloud, not ARZ.  Every 5 minutes while a phone is connected the cloud helper
+  builds a summary (today/yesterday/month sales, needs attention, stock with
+  batches, patient credit, last 10 bills), locks it with a fresh key
+  (ChaCha20-Poly1305) and wraps that key once per phone (X25519 -> HKDF-SHA256
+  -> ChaCha20-Poly1305, aad = device id).  The phone's half is
+  mobile/src/lockbox.js; the two must match byte for byte, and
+  test_owner_app.py runs the phone's real code under Node to prove it.
+  CONNECTING: the PC shows a QR {cloud, shop code, pairing id, SECRET}.  The
+  phone sends the cloud its public key + HMAC(secret, key + id); the PC fetches
+  that claim, checks the proof, and only then approves.  The cloud never sees
+  the secret.  Codes last 10 minutes and work once.  At most 5 phones.
+  Removing a phone on the PC, or unlinking on the phone, stops new summaries
+  being locked for it (heartbeat reply "owner_devices" keeps both sides in step).
+  A lapsed subscription sends {"restricted": true} and nothing else; new phones
+  cannot be connected (402).  The morning notification (once a day after 9 am
+  IST) carries COUNTS ONLY, never money - it passes through Expo and Google
+  readable.  Never add a money figure or a patient name to push_text().
+  The app is mobile/ (Expo, Android APK first; see mobile/README.md).
+  Guard: backend/scripts/test_owner_app.py
+
 ---
 
 ## 5. Design system (glassmorphism — do not change without asking)
@@ -981,6 +1004,17 @@ POST   /api/cloud/backup-now        → 202; starts a round with a forced backup
                                       (Owner/Administrator).
 POST   /api/diagnostics/client-error → 204; a screen's crash.  No login, size-
                                       capped, 30/minute.
+
+### Owner app (shop side; Owner/Administrator except the list)
+GET    /api/owner-app/devices       → {cloud_enabled, last_summary_at, max_phones,
+                                      devices[{device_id, name, added_at}]}
+POST   /api/owner-app/pairings      → 201 {pairing_id, expires_at, qr}.  503 when
+                                      the cloud is off/unreachable, 402 when
+                                      restricted, 400 at 5 phones.
+GET    /api/owner-app/pairings/{id} → OPEN / DONE / FAILED / EXPIRED; the screen
+                                      polls every 2 s - this is where the phone's
+                                      proof is checked.
+DELETE /api/owner-app/devices/{id}  → remove a phone (here and at the cloud)
 
 ### Licence (Curavo subscription)
 GET    /api/licence/status          → state TRIAL|ACTIVE|GRACE|EXPIRED, restricted,

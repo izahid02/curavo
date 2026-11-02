@@ -161,6 +161,32 @@ export default function ShopDetail({ onChanged }) {
       </section>
 
       <section className="card">
+        <SectionTitle>Owner app phones</SectionTitle>
+        {(s.phones || []).length === 0 ? <Empty>No phone connected.</Empty> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead><tr><th>Phone</th><th>Status</th><th>Connected</th><th>Last opened</th><th>Notifications</th></tr></thead>
+              <tbody>
+                {s.phones.map((d, i) => (
+                  <tr key={i} style={{ cursor: 'default' }}>
+                    <td>{d.name}</td>
+                    <td>{d.status === 'ACTIVE' ? 'Connected' : 'Waiting for the PC'}</td>
+                    <td>{when(d.connected_at)}</td>
+                    <td>{d.last_seen_at ? timeAgo(d.last_seen_at) : '—'}</td>
+                    <td>{d.push ? 'On' : 'Off'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 12, lineHeight: 1.6 }}>
+          Phones are connected and removed by the owner on the shop PC (account menu, Owner app on phone).
+          {s.owner_summary_at && <> Figures last left for them {timeAgo(s.owner_summary_at)} - locked, so this panel cannot read them.</>}
+        </p>
+      </section>
+
+      <section className="card">
         <SectionTitle>Errors at this shop</SectionTitle>
         <ErrorList rows={s.errors} showShop={false} onChange={() => { load(); onChanged?.(); }} />
       </section>

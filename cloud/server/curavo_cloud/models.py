@@ -176,3 +176,45 @@ class Lead(Base):
     status     = Column(String(20), default="NEW", nullable=False, index=True)
     notes      = Column(Text)
     updated_at = Column(DateTime, default=utcnow)
+
+
+class OwnerPairingCloud(Base):
+    """
+    A "Connect phone" QR code shown on a shop PC.  The cloud only relays:
+    it holds the phone's claim until the shop PC checks the proof (the secret
+    that proves it is in the QR never reaches this server).
+    """
+    __tablename__ = "owner_pairings"
+
+    id         = Column(Integer, primary_key=True)
+    shop_id    = Column(Integer, ForeignKey("shops.id"), index=True, nullable=False)
+    pairing_id = Column(String(40), unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    status     = Column(String(12), default="OPEN", nullable=False)   # OPEN/CLAIMED/APPROVED/REJECTED
+    claim_json = Column(Text)
+    reason     = Column(Text)
+
+
+class MobileDevice(Base):
+    """An owner's phone.  Its token is how it signs in; ACTIVE once the shop PC approved it."""
+    __tablename__ = "mobile_devices"
+
+    id           = Column(Integer, primary_key=True)
+    device_id    = Column(String(40), unique=True, nullable=False)
+    shop_id      = Column(Integer, ForeignKey("shops.id"), index=True, nullable=False)
+    name         = Column(String(80))
+    token_hash   = Column(String(64), nullable=False)
+    status       = Column(String(10), default="PENDING", nullable=False)   # PENDING/ACTIVE/REMOVED
+    created_at   = Column(DateTime, default=utcnow)
+    last_seen_at = Column(DateTime)
+    push_token   = Column(String(200))
+
+
+class OwnerSummary(Base):
+    """The newest LOCKED summary from a shop PC (one row per shop).  Unreadable here."""
+    __tablename__ = "owner_summaries"
+
+    shop_id    = Column(Integer, ForeignKey("shops.id"), primary_key=True)
+    locked     = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=utcnow)
+    size       = Column(Integer)

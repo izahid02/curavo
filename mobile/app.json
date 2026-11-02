@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Curavo Owner",
+    "slug": "curavo-owner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f4f3fb"
+    },
+    "android": {
+      "package": "in.curavo.owner",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-foreground.png",
+        "backgroundImage": "./assets/adaptive-background.png"
+      },
+      "permissions": ["CAMERA", "POST_NOTIFICATIONS"],
+      "blockedPermissions": ["RECORD_AUDIO"],
+      "allowBackup": false
+    },
+    "plugins": [
+      ["expo-camera", {
+        "cameraPermission": "The camera reads the code on the shop PC screen to connect this phone.",
+        "recordAudioAndroid": false
+      }],
+      ["expo-notifications", {
+        "icon": "./assets/notification-icon.png",
+        "color": "#6366f1"
+      }],
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {}
+    }
+  }
+}

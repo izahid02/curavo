@@ -25,4 +25,4 @@ from app.models.settings import PharmacySettings  # noqa: F401
 # Curavo subscription (trial, shop code, licence key).  One row.
 from app.models.licence import LicenceState  # noqa: F401
 # Curavo cloud link (one row).
-from app.models.cloud import CloudState, ErrorReport  # noqa: F401
+from app.models.cloud import CloudState, ErrorReport, OwnerDevice, OwnerPairing  # noqa: F401

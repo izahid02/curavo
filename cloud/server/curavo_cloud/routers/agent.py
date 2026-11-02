@@ -124,6 +124,11 @@ def heartbeat(body: HeartbeatIn, shop: Shop = Depends(current_shop), db: Session
         else:
             reply["licence_key"] = shop.pending_licence_key
 
+    # Owner app: which phones are still connected (one unlinked on the phone
+    # itself is forgotten by the shop PC too).
+    from curavo_cloud.routers.owner import active_device_ids
+    reply["owner_devices"] = active_device_ids(db, shop)
+
     # Housekeeping, cheaply: old heartbeats go.
     db.query(Heartbeat).filter(Heartbeat.shop_id == shop.id,
                                Heartbeat.at < now - timedelta(days=HEARTBEAT_KEEP_DAYS)).delete()

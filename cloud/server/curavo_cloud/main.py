@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from curavo_cloud.config import settings
 from curavo_cloud.db import Base, SessionLocal, engine
 from curavo_cloud.models import AdminUser
-from curavo_cloud.routers import admin, agent, leads, updates
+from curavo_cloud.routers import admin, agent, leads, owner, updates
 from curavo_cloud.security import hash_password
 
 PANEL_DIST = Path(__file__).resolve().parents[2] / "admin" / "dist"
@@ -72,6 +72,7 @@ app.include_router(agent.router)
 app.include_router(admin.router)
 app.include_router(updates.router)
 app.include_router(leads.router)
+app.include_router(owner.router)
 
 # Only the Curavo website may send the demo form from a browser.  (Shop PCs and
 # the panel are not affected: the PCs do not use a browser, and the panel is
@@ -91,7 +92,7 @@ if PANEL_DIST.exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def panel(path: str):
-        if path.startswith(("admin/api", "agent/", "updates/", "download/", "public/")):
+        if path.startswith(("admin/api", "agent/", "updates/", "download/", "public/", "mobile/")):
             from fastapi import HTTPException
             raise HTTPException(status_code=404)
         f = (PANEL_DIST / path).resolve()
