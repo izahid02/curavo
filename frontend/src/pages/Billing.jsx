@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
 import { usePharmacy } from '../lib/pharmacy';
+import { loadBrandingImage } from '../lib/branding';
 import MedicineSearchBox from '../components/shared/MedicineSearchBox';
 import PrescriptionUpload from '../components/billing/PrescriptionUpload';
 import PatientHistoryPanel from '../components/billing/PatientHistoryPanel';
@@ -107,6 +108,33 @@ function lineKeyOf(product) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+
+/**
+ * Inter (regular + semibold), trimmed to the characters an invoice needs and
+ * served from /fonts.  Loaded on the first PDF only, then kept for the
+ * session.  jsPDF wants each font as a base64 string.
+ */
+let invoiceFontsPromise = null;
+function loadInvoiceFonts() {
+  if (!invoiceFontsPromise) {
+    const toBase64 = async (path) => {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error('Invoice font missing: ' + path);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      return btoa(bin);
+    };
+    invoiceFontsPromise = Promise.all([
+      toBase64('/fonts/Inter-Regular.ttf'),
+      toBase64('/fonts/Inter-SemiBold.ttf'),
+    ]).then(([regular, semibold]) => ({ regular, semibold }))
+      .catch((e) => { invoiceFontsPromise = null; throw e; });   // retry next time
+  }
+  return invoiceFontsPromise;
+}
 
 export default function Billing() {
   // The shop's own identity (Pharmacy Settings) — printed on the A4 invoice.
@@ -808,7 +836,21 @@ export default function Billing() {
     window.print();
   }
 
-  // ── Generate A4 Tax Invoice PDF (premium navy/indigo design) ─────────────────
+  // ── A4 Tax Invoice PDF — Curavo design "A, Clean ledger" (Nov 2026) ─────────
+  //
+  // White page, one thin accent line, light-grey table header: it reads well
+  // in colour AND on a black-and-white laser printer, and uses little toner
+  // (the old design had a full navy header and a filled green total box).
+  //
+  // Every figure comes from the server's own numbers for this bill
+  // (taxable_amount / gst_amount / line_total per line, totals on the
+  // invoice) — the PDF never re-derives a price, so it cannot disagree with
+  // what was charged.  Shop identity comes from Pharmacy Settings; the logo
+  // and signature are the shop's own uploads (lib/branding.js).
+  //
+  // Text uses Inter (frontend/public/fonts, SIL Open Font Licence), embedded
+  // because jsPDF's built-in Helvetica has no ₹ sign — the old invoice had to
+  // print "Rs.".
   async function printReceipt(invoice) {
     if (!invoice) return;
 
@@ -816,302 +858,281 @@ export default function Billing() {
     const invoiceShopName = (pharmacy.invoice_name || '').trim()
       || (pharmacy.pharmacy_name || '').toUpperCase();
 
-    // Color palette
-    const DARK_NAVY = [15, 23, 42];
-    const ACCENT = [99, 102, 241];
-    const LIGHT_GRAY = [248, 250, 252];
-    const BORDER = [226, 232, 240];
-    const TEXT_DARK = [15, 23, 42];
-    const TEXT_MUTED = [100, 116, 139];
-    const WHITE = [255, 255, 255];
-    const GREEN = [5, 150, 105];
+    // Colours — ink first; the accent is only ever a thin line or a word.
+    const INK    = [17, 24, 39];
+    const MUTED  = [75, 85, 99];
+    const HINT   = [107, 114, 128];
+    const RULE   = [229, 231, 235];
+    const HEADBG = [243, 244, 246];
+    const ACCENT = [79, 70, 229];
+
+    // Money: always 2 decimals, Indian grouping, real ₹ sign.
+    const rs = (v) => '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Round half-up to paise (same rule billing_service uses).
+    const paise = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
+    // "2027-08-31" -> "08/27"
+    const mmyy = (d) => (d ? `${d.slice(5, 7)}/${d.slice(2, 4)}` : '—');
 
     try {
       const jsPDF = (await import('jspdf')).default;
       const { default: autoTable } = await import('jspdf-autotable');
+      const [fonts, logo, signature] = await Promise.all([
+        loadInvoiceFonts(), loadBrandingImage('logo'), loadBrandingImage('signature'),
+      ]);
 
       const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      doc.addFileToVFS('Inter-Regular.ttf', fonts.regular);
+      doc.addFont('Inter-Regular.ttf', 'Inter', 'normal');
+      doc.addFileToVFS('Inter-SemiBold.ttf', fonts.semibold);
+      doc.addFont('Inter-SemiBold.ttf', 'Inter', 'bold');
+      const font = (style, size, color = INK) => {
+        doc.setFont('Inter', style); doc.setFontSize(size); doc.setTextColor(...color);
+      };
+      // Fit an image inside a w×h box, keeping its shape; returns the drawn size.
+      const placeImage = (img, x, y, w, h, align = 'left') => {
+        const scale = Math.min(w / img.width, h / img.height);
+        const dw = img.width * scale, dh = img.height * scale;
+        const dx = align === 'center' ? x + (w - dw) / 2 : align === 'right' ? x + w - dw : x;
+        doc.addImage(img.dataUrl, 'PNG', dx, y + (h - dh) / 2, dw, dh);
+        return { dw, dh };
+      };
+      // One line of text, cut with "…" if it would not fit in `w` mm.
+      const fit = (text, w) => {
+        let t = String(text ?? '');
+        if (doc.getTextWidth(t) <= w) return t;
+        while (t.length > 1 && doc.getTextWidth(t + '…') > w) t = t.slice(0, -1);
+        return t + '…';
+      };
 
-      const PW = 210;
-      const ML = 15;
-      const MR = 15;
-      let y = 0;
+      const PW = 210, PH = 297, ML = 14, MR = 14, CW = PW - ML - MR;
+      let y = 13;
 
-      // ── A) HEADER — navy background, 35mm ──────────────────────────────────
-      const HEADER_H = 35;
-      doc.setFillColor(...DARK_NAVY);
-      doc.rect(0, 0, PW, HEADER_H, 'F');
-
-      // The SHOP's logo (not Curavo's).  It used to be scraped from whatever
-      // <img> happened to be on screen — the sidebar showed HCC_LOGO.png, so it
-      // always worked.  The sidebar now shows the Curavo mark, so the PDF loads
-      // the shop logo file itself and no longer depends on what is on screen.
-      // If the file is missing, the invoice simply prints without a logo.
-      const logoDataUrl = await new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            const c = document.createElement('canvas');
-            c.width = img.naturalWidth;
-            c.height = img.naturalHeight;
-            c.getContext('2d').drawImage(img, 0, 0);
-            resolve(c.toDataURL('image/png'));
-          } catch (_) { resolve(null); }
-        };
-        img.onerror = () => resolve(null);
-        img.src = '/HCC_LOGO.png';
-      });
-      if (logoDataUrl) {
-        // Vertically centered in header: (35 - 22) / 2 = 6.5mm from top
-        doc.addImage(logoDataUrl, 'PNG', ML, 6.5, 22, 22);
+      // ── 1. Shop identity (left) + TAX INVOICE / GSTIN / DL (right) ────────
+      const LOGO = 15;
+      let textX = ML;
+      if (logo) {
+        doc.setDrawColor(...RULE); doc.setLineWidth(0.3);
+        doc.roundedRect(ML, y, LOGO, LOGO, 3, 3, 'S');
+        placeImage(logo, ML + 1.2, y + 1.2, LOGO - 2.4, LOGO - 2.4, 'center');
+        textX = ML + LOGO + 4;
       }
+      const RIGHT_W = 64;                              // right-hand column
+      const LEFT_W  = PW - MR - RIGHT_W - 6 - textX;
 
-      // Shop name — left of center, after logo
-      const textX = logoDataUrl ? ML + 26 : ML;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(13);
-      doc.setTextColor(...WHITE);
-      // Everything in this header comes from Pharmacy Settings — it used to be
-      // HCC's own name, address, GSTIN, licence and phone typed into the code,
-      // which every other shop would have printed on ITS tax invoices.
-      //   name    : "Name on invoices" exactly as typed, else the shop name in capitals
-      //   address : the settings address; each line the owner typed is a line
-      //             here (max 2 — the header is 35mm tall).  A single long line
-      //             is wrapped to fit instead.
-      //   right   : GSTIN / DL / Ph, each only if filled in, stacked from the top
-      doc.text(invoiceShopName, textX, 13);
+      font('bold', 15);
+      doc.text(fit(invoiceShopName, LEFT_W), textX, y + 5.2);
+      font('normal', 8, MUTED);
+      let addr = (pharmacy.pharmacy_address || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      if (addr.length === 1) addr = doc.splitTextToSize(addr[0], LEFT_W);
+      if (addr.length > 2) addr = [addr[0], addr.slice(1).join(', ')];
+      let ly = y + 10.2;
+      addr.forEach((line) => { doc.text(fit(line, LEFT_W), textX, ly); ly += 3.9; });
+      if (pharmacy.pharmacy_phone) { doc.text('Ph: ' + pharmacy.pharmacy_phone, textX, ly); ly += 3.9; }
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor(255, 255, 255);  // white at 0.75 opacity — jsPDF has no opacity, use white
-      const ADDRESS_W = PW - MR - 62 - textX;     // stop short of the right-hand column
-      let addrLines = (pharmacy.pharmacy_address || '')
-        .split('\n').map((l) => l.trim()).filter(Boolean);
-      if (addrLines.length === 1) addrLines = doc.splitTextToSize(addrLines[0], ADDRESS_W);
-      if (addrLines.length > 2) addrLines = [addrLines[0], addrLines.slice(1).join(', ')];
-      addrLines.forEach((line, i) => doc.text(line, textX, 18 + i * 4.5));
+      // Letter-spaced title: jsPDF's right-align ignores charSpace, so place
+      // it from the left using its true spaced width.
+      font('bold', 9.5, ACCENT);
+      const TITLE = 'TAX INVOICE', SPACE = 0.9;
+      const titleW = doc.getTextWidth(TITLE) + SPACE * (TITLE.length - 1);
+      doc.text(TITLE, PW - MR - titleW, y + 4, { charSpace: SPACE });
+      let ry = y + 9.6;
+      const labelled = (label, value) => {
+        font('bold', 8, INK);
+        const vw = doc.getTextWidth(value);
+        doc.text(value, PW - MR, ry, { align: 'right' });
+        font('normal', 8, MUTED);
+        doc.text(label + '  ', PW - MR - vw, ry, { align: 'right' });
+        ry += 4.4;
+      };
+      if (pharmacy.pharmacy_gstin)     labelled('GSTIN', pharmacy.pharmacy_gstin);
+      if (pharmacy.pharmacy_dl_number) labelled('DL', fit(pharmacy.pharmacy_dl_number, RIGHT_W - 8));
 
-      // Right-side details
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...WHITE);
-      const rightLines = [
-        pharmacy.pharmacy_gstin     && { text: 'GSTIN: ' + pharmacy.pharmacy_gstin, size: 8 },
-        pharmacy.pharmacy_dl_number && { text: 'DL: ' + pharmacy.pharmacy_dl_number, size: 7.5 },
-        pharmacy.pharmacy_phone     && { text: 'Ph: ' + pharmacy.pharmacy_phone, size: 7.5 },
-      ].filter(Boolean);
-      rightLines.forEach(({ text, size }, i) => {
-        doc.setFontSize(size);
-        doc.text(text, PW - MR, 10 + i * 5, { align: 'right' });
+      y = Math.max(ly, ry, logo ? y + LOGO + 2 : 0) + 2;
+      doc.setDrawColor(...ACCENT); doc.setLineWidth(0.6);
+      doc.line(ML, y, PW - MR, y);
+      y += 4.5;
+
+      // ── 2. Invoice details: four boxes in one bordered strip ──────────────
+      const META_H = 16, colW = CW / 4;
+      doc.setDrawColor(...RULE); doc.setLineWidth(0.3);
+      doc.roundedRect(ML, y, CW, META_H, 2, 2, 'S');
+      for (let i = 1; i < 4; i++) doc.line(ML + colW * i, y, ML + colW * i, y + META_H);
+      const isCredit = (invoice.payment_method || '').toUpperCase() === 'CREDIT';
+      const meta = [
+        ['INVOICE NO.', invoice.invoice_number, null],
+        ['DATE', formatDateTimeShort(invoice.invoice_date), null],
+        ['PATIENT', invoice.patient_name || 'Walk-in Customer', invoice.patient_mobile || null],
+        ['PAYMENT', invoice.payment_method || 'CASH',
+          isCredit && invoice.credit_due_date ? 'Due ' + formatDateOnly(invoice.credit_due_date)
+            : invoice.referred_by ? 'Ref. by ' + invoice.referred_by : null],
+      ];
+      meta.forEach(([label, value, sub], i) => {
+        const x = ML + colW * i + 3.2, w = colW - 6.4;
+        font('bold', 6.3, HINT);
+        doc.text(label, x, y + 4.6, { charSpace: 0.35 });
+        font('bold', 8.6);
+        doc.text(fit(value, w), x, y + 9.4);
+        if (sub) { font('normal', 7.3, MUTED); doc.text(fit(sub, w), x, y + 13.2); }
       });
+      y += META_H + 5;
 
-      y = HEADER_H;
-
-      // ── B) TAX INVOICE BANNER — indigo, 8mm ────────────────────────────────
-      doc.setFillColor(...ACCENT);
-      doc.rect(0, y, PW, 8, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(...WHITE);
-      doc.text('TAX INVOICE', PW / 2, y + 5.5, { align: 'center' });
-      y += 8;
-
-      // ── C) INVOICE META — light gray background, 2-column ──────────────────
-      const META_H = 22;
-      doc.setFillColor(...LIGHT_GRAY);
-      doc.rect(0, y, PW, META_H, 'F');
-
-      // invoice_date is stored in UTC — render it in IST (see lib/datetime.js)
-      // so the printed A4 invoice shows the correct local date and time.
-      const dateStr = formatDateTimeShort(invoice.invoice_date);
-
-      const metaY = y + 5;
-      const LABEL_X = ML;
-      const VALUE_X = ML + 30;
-      const LINE_GAP = 5;
-
-      // Left column labels
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...TEXT_MUTED);
-      doc.text('Invoice No.', LABEL_X, metaY);
-      doc.text('Date', LABEL_X, metaY + LINE_GAP);
-      doc.text('Patient', LABEL_X, metaY + LINE_GAP * 2);
-      if (invoice.referred_by) {
-        doc.text('Referred by', LABEL_X, metaY + LINE_GAP * 3);
-      }
-
-      // Left column values
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...TEXT_DARK);
-      doc.text(invoice.invoice_number, VALUE_X, metaY);
-      doc.text(dateStr, VALUE_X, metaY + LINE_GAP);
-      doc.text(invoice.patient_name || 'Walk-in Customer', VALUE_X, metaY + LINE_GAP * 2);
-      if (invoice.referred_by) {
-        doc.text(invoice.referred_by, VALUE_X, metaY + LINE_GAP * 3);
-      }
-
-      // Right column
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...TEXT_MUTED);
-      doc.text('Payment', PW / 2 + 10, metaY);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...TEXT_DARK);
-      doc.text(invoice.payment_method || 'CASH', PW / 2 + 10 + 20, metaY);
-
-      y += META_H;
-
-      // ── D) ITEMS TABLE ──────────────────────────────────────────────────────
-      // Columns: Sl No | Medicine & Batch | Qty | HSN | GST% | CGST | SGST | Total
-      // Widths:    10  |       55         | 10  |  22 |  12  |  18  |  18  |  35  = 180mm
-
-      const tableRows = (invoice.items || []).map((item, idx) => {
-        const lineTotal = Number(item.line_total);
-        const gstRate = Number(item.gst_rate);
-        const gstAmt = lineTotal * gstRate / (100 + gstRate);
-        const half = gstAmt / 2;
-        return [
-          idx + 1,
-          item.product_name + '\nBatch: ' + (item.batch_number || '-'),
-          item.quantity,
-          item.hsn_code || '30049099',
-          gstRate + '%',
-          'Rs.' + half.toFixed(2),
-          'Rs.' + half.toFixed(2),
-          'Rs.' + lineTotal.toFixed(2),
-        ];
-      });
-
+      // ── 3. Items ───────────────────────────────────────────────────────────
+      const items = invoice.items || [];
       autoTable(doc, {
         startY: y,
-        head: [['Sl No', 'Medicine & Batch', 'Qty', 'HSN', 'GST%', 'CGST', 'SGST', 'Total']],
-        body: tableRows,
+        margin: { left: ML, right: MR, top: 16, bottom: 34 },
+        head: [['#', 'MEDICINE', 'BATCH', 'EXP', 'HSN', 'QTY', 'TAXABLE', 'GST', 'AMOUNT']],
+        body: items.map((it, i) => [
+          i + 1,
+          it.product_name,
+          it.batch_number || '—',
+          mmyy(it.expiry_date),
+          it.hsn_code || '—',
+          it.quantity,
+          rs(it.taxable_amount),
+          Number(it.gst_rate) + '%',
+          rs(it.line_total),
+        ]),
         theme: 'plain',
+        showHead: 'everyPage',
         styles: {
-          fontSize: 8.5,
-          cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
-          textColor: TEXT_DARK,
-          lineColor: BORDER,
-          lineWidth: 0.15,
+          font: 'Inter', fontStyle: 'normal', fontSize: 8, textColor: INK,
+          cellPadding: { top: 2.4, bottom: 2.4, left: 1.6, right: 1.6 },
         },
-        headStyles: {
-          fillColor: DARK_NAVY,
-          textColor: WHITE,
-          fontStyle: 'bold',
-          fontSize: 8,
-        },
-        alternateRowStyles: { fillColor: LIGHT_GRAY },
+        headStyles: { fillColor: HEADBG, textColor: [55, 65, 81], fontStyle: 'bold', fontSize: 6.5 },
         columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 55 },
-          2: { cellWidth: 10, halign: 'center' },
-          3: { cellWidth: 22, halign: 'center' },
-          4: { cellWidth: 12, halign: 'center' },
-          5: { cellWidth: 18, halign: 'right' },
-          6: { cellWidth: 18, halign: 'right' },
-          7: { cellWidth: 35, halign: 'right' },
+          0: { cellWidth: 7, textColor: HINT },
+          1: { cellWidth: 'auto', fontStyle: 'bold' },
+          2: { cellWidth: 19 },
+          3: { cellWidth: 12 },
+          4: { cellWidth: 19.5, textColor: MUTED },
+          5: { cellWidth: 11, halign: 'right' },
+          6: { cellWidth: 22, halign: 'right' },
+          7: { cellWidth: 11, halign: 'right', textColor: MUTED },
+          8: { cellWidth: 23, halign: 'right', fontStyle: 'bold' },
         },
-        margin: { left: ML, right: MR },
-        didParseCell(data) {
-          // Style the batch line inside the Medicine cell
-          if (data.column.index === 1 && data.row.section === 'body') {
-            data.cell.styles.fontSize = 8.5;
+        didParseCell(d) {           // right-align the money/qty headers too
+          if (d.section === 'head' && d.column.index >= 5) d.cell.styles.halign = 'right';
+        },
+        didDrawCell(d) {            // hairline under every body row, nothing else
+          if (d.section === 'body') {
+            doc.setDrawColor(...RULE); doc.setLineWidth(0.25);
+            doc.line(d.cell.x, d.cell.y + d.cell.height, d.cell.x + d.cell.width, d.cell.y + d.cell.height);
           }
         },
       });
+      y = doc.lastAutoTable.finalY + 6;
 
-      y = doc.lastAutoTable.finalY + 5;
-
-      // ── E) TOTALS SECTION — right-aligned block, 80mm wide ─────────────────
-      const totalGST = Number(invoice.gst_amount);
-      const subtotal = Number(invoice.subtotal);
-      const grandTotal = Number(invoice.total_amount);
-      const discAmt = Number(invoice.discount_amount || 0);
-      // Home visit fee is a SERVICE charge — it sits outside the CGST/SGST
-      // block on purpose, because no GST was charged on it.
-      const homeVisit = Number(invoice.home_visit_charge || 0);
-
-      const BLOCK_W = 80;
-      const rx = PW - MR - BLOCK_W;   // left edge of totals block
-
-      const totalsLines = [
-        ['Subtotal (excl. GST)', subtotal],
-        ['CGST', totalGST / 2],
-        ['SGST', totalGST / 2],
-        ...(homeVisit > 0 ? [['Home Visit Charge (no GST)', homeVisit]] : []),
-        ...(discAmt > 0 ? [['Discount', discAmt]] : []),
-      ];
-
-      doc.setFontSize(9);
-      let ty = y;
-      totalsLines.forEach(([label, val]) => {
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...TEXT_MUTED);
-        doc.text(label, rx, ty);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...TEXT_DARK);
-        doc.text('Rs.' + val.toFixed(2), PW - MR, ty, { align: 'right' });
-        ty += 5;
+      // ── 4. GST summary + words (left) and totals (right) ──────────────────
+      // Group by rate.  CGST is half the GST rounded half-up; SGST is the rest,
+      // so the two always add back to exactly the GST on the lines.
+      const byRate = {};
+      items.forEach((it) => {
+        const r = Number(it.gst_rate);
+        byRate[r] = byRate[r] || { taxable: 0, gst: 0 };
+        byRate[r].taxable += Number(it.taxable_amount);
+        byRate[r].gst += Number(it.gst_amount);
+      });
+      const gstRows = Object.keys(byRate).map(Number).sort((a, b) => a - b).map((r) => {
+        const taxable = paise(byRate[r].taxable), gst = paise(byRate[r].gst);
+        const cgst = paise(gst / 2);
+        return { r, taxable, cgst, sgst: paise(gst - cgst) };
       });
 
-      // Divider above TOTAL
-      ty += 1;
-      doc.setDrawColor(...BORDER);
-      doc.setLineWidth(0.3);
-      doc.line(rx, ty, PW - MR, ty);
-      ty += 3;
+      const itemsTotal = paise(items.reduce((s, it) => s + Number(it.line_total), 0));
+      const homeVisit  = Number(invoice.home_visit_charge || 0);
+      const discount   = Number(invoice.discount_amount || 0);
+      const grandTotal = Number(invoice.total_amount);
 
-      // Green TOTAL box
-      doc.setFillColor(...GREEN);
-      doc.rect(rx - 2, ty - 4, BLOCK_W + 2, 10, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.setTextColor(...WHITE);
-      doc.text('TOTAL', rx + 2, ty + 3);
-      doc.text('Rs.' + grandTotal.toFixed(2), PW - MR - 1, ty + 3, { align: 'right' });
-      doc.setTextColor(...TEXT_DARK);
+      const SUMMARY_H = 12 + gstRows.length * 4.4 + (gstRows.length > 1 ? 4.4 : 0);
+      const blockH = Math.max(SUMMARY_H + 10, 30 + (homeVisit > 0 ? 5 : 0) + (discount > 0 ? 10 : 0));
+      if (y + blockH > PH - 36) { doc.addPage(); y = 18; }
 
-      y = ty + 14;
+      // GST summary box
+      const TOT_W = 66, LBOX_W = CW - TOT_W - 10;
+      doc.setDrawColor(...RULE); doc.setLineWidth(0.3);
+      doc.roundedRect(ML, y, LBOX_W, SUMMARY_H, 2, 2, 'S');
+      font('bold', 6.3, HINT);
+      doc.text('GST SUMMARY', ML + 3.2, y + 4.8, { charSpace: 0.35 });
+      const gx = [ML + 3.2, ML + LBOX_W * 0.45, ML + LBOX_W * 0.7, ML + LBOX_W - 3.2];   // right edges for numbers
+      let gy = y + 9.2;
+      font('bold', 7.5, [55, 65, 81]);
+      doc.text('Rate', gx[0], gy);
+      doc.text('Taxable', gx[1], gy, { align: 'right' });
+      doc.text('CGST', gx[2], gy, { align: 'right' });
+      doc.text('SGST', gx[3], gy, { align: 'right' });
+      font('normal', 7.5, [55, 65, 81]);
+      const sumRow = (label, t, c, s) => {
+        gy += 4.4;
+        doc.text(label, gx[0], gy);
+        doc.text(rs(t), gx[1], gy, { align: 'right' });
+        doc.text(rs(c), gx[2], gy, { align: 'right' });
+        doc.text(rs(s), gx[3], gy, { align: 'right' });
+      };
+      gstRows.forEach((g) => sumRow(`${g.r}%  (${g.r / 2}% + ${g.r / 2}%)`, g.taxable, g.cgst, g.sgst));
+      if (gstRows.length > 1) {
+        font('bold', 7.5, INK);
+        sumRow('Total',
+          paise(gstRows.reduce((s, g) => s + g.taxable, 0)),
+          paise(gstRows.reduce((s, g) => s + g.cgst, 0)),
+          paise(gstRows.reduce((s, g) => s + g.sgst, 0)));
+      }
+      font('bold', 8, [55, 65, 81]);
+      const wordsY = y + SUMMARY_H + 6;
+      doc.text('Amount in words:', ML, wordsY);
+      const lw = doc.getTextWidth('Amount in words: ');
+      font('normal', 8, [55, 65, 81]);
+      // The totals column ends above this line, so the words may use the full width.
+      doc.text(doc.splitTextToSize(numberToWords(grandTotal) + ' Only', CW - lw), ML + lw, wordsY);
 
-      // ── F) AMOUNT IN WORDS ──────────────────────────────────────────────────
-      doc.setFillColor(...LIGHT_GRAY);
-      doc.rect(0, y, PW, 14, 'F');
+      // Totals column
+      const tx = PW - MR - TOT_W;
+      let ty = y + 3.5;
+      const totalLine = (label, value) => {
+        font('normal', 8.3, MUTED);
+        doc.text(label, tx, ty);
+        doc.text(value, PW - MR, ty, { align: 'right' });
+        ty += 5;
+      };
+      totalLine('Items total (incl. GST)', rs(itemsTotal));
+      if (homeVisit > 0) totalLine('Home visit (no GST)', rs(homeVisit));
+      if (discount > 0)  totalLine('Discount', '−' + rs(discount));
+      ty += 0.5;
+      doc.setDrawColor(...INK); doc.setLineWidth(0.55);
+      doc.line(tx, ty - 2.2, PW - MR, ty - 2.2);
+      font('bold', 10);
+      doc.text('TOTAL', tx, ty + 4.2);
+      font('bold', 17);
+      doc.text(rs(grandTotal), PW - MR, ty + 5, { align: 'right' });
+      if (discount > 0) {
+        font('bold', 8, ACCENT);
+        doc.text('You saved ' + rs(discount), PW - MR, ty + 11, { align: 'right' });
+      }
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...TEXT_DARK);
-      doc.text('Amount in words: ' + numberToWords(grandTotal) + ' Only', ML, y + 5);
+      // ── 5. Footer: notes (left), signature (right) — on the last page ─────
+      const fy = PH - 30;
+      doc.setDrawColor(...RULE); doc.setLineWidth(0.3);
+      doc.line(ML, fy, PW - MR, fy);
+      font('normal', 7, HINT);
+      doc.text('Prices are MRP, inclusive of GST.', ML, fy + 5);
+      doc.text('Computer-generated invoice · Curavo', ML, fy + 9);
 
-      doc.setFontSize(7.5);
-      doc.setTextColor(...TEXT_MUTED);
-      doc.text('All prices are MRP inclusive of taxes. This is a computer generated invoice.', ML, y + 10);
+      const SIG_W = 60, sx = PW - MR - SIG_W;
+      if (signature) placeImage(signature, sx + 8, fy + 2, SIG_W - 16, 11, 'center');
+      font('bold', 8);
+      doc.text(fit('For ' + invoiceShopName, SIG_W), sx + SIG_W / 2, fy + 17, { align: 'center' });
+      font('normal', 7, HINT);
+      doc.text('Authorised signatory', sx + SIG_W / 2, fy + 21, { align: 'center' });
 
-      y += 18;
-
-      // ── G) FOOTER — pinned near bottom of A4 for balanced layout ───────────
-      // Push footer down so it sits near the bottom rather than floating mid-page
-      const footerY = Math.max(y + 10, 260);
-
-      doc.setDrawColor(...BORDER);
-      doc.setLineWidth(0.3);
-      doc.line(ML, footerY, PW - MR, footerY);
-
-      // Right: company signatory block
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...TEXT_DARK);
-      doc.text('For ' + invoiceShopName, PW - MR, footerY + 8, { align: 'right' });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor(...TEXT_MUTED);
-      doc.text('Authorised Signatory', PW - MR, footerY + 14, { align: 'right' });
-
-      // Bottom center: powered by
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(7);
-      doc.setTextColor(...TEXT_MUTED);
-      doc.text('Powered by ARZ Solutions', PW / 2, footerY + 22, { align: 'center' });
+      // Page numbers, only when the bill ran past one page.
+      const pages = doc.getNumberOfPages();
+      if (pages > 1) {
+        for (let p = 1; p <= pages; p++) {
+          doc.setPage(p);
+          font('normal', 7, HINT);
+          doc.text(`${invoice.invoice_number} · Page ${p} of ${pages}`, PW / 2, PH - 8, { align: 'center' });
+        }
+      }
 
       doc.save('Invoice-' + invoice.invoice_number + '.pdf');
 

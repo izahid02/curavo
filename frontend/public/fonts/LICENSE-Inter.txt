@@ -1,0 +1,10 @@
+Inter font (Inter-Regular.ttf, Inter-SemiBold.ttf)
+
+Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full license text is available at https://openfontlicense.org
+
+The files in this folder are subsets of the original fonts (Latin characters
+plus the Indian rupee sign), made with fontTools for use in Curavo's printed
+tax invoices.  They are distributed under the same license.

@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { clearAuth, getUser, saveToken } from '../lib/auth';
 import { api, setAuthToken } from '../lib/api';
 import { usePharmacy } from '../lib/pharmacy.jsx';
+import { clearBrandingCache, loadBrandingImage } from '../lib/branding';
 import Icon from './shared/Icon';
 /** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
  *  in backend/app/routers/settings.py — the backend enforces it either way. */
@@ -429,9 +430,9 @@ export default function Layout() {
             gap: '10px',
             padding: '4px 0',
           }}>
-            {/* The PRODUCT's mark.  The shop's own logo (HCC_LOGO.png) is
-                still what prints on receipts and invoices — that is the
-                shop's identity, not ours. */}
+            {/* The PRODUCT's mark.  The shop's own logo (uploaded in
+                Pharmacy Settings) is what prints on receipts and invoices —
+                that is the shop's identity, not ours. */}
             <img
               src="/curavo-logo.svg"
               alt="Curavo"
@@ -1028,13 +1029,6 @@ export default function Layout() {
         document.body,
       )}
 
-      {/* Preload signature so jsPDF can grab it from the DOM via canvas drawImage */}
-      <img
-        src="/HCC_SIGNATURE.png"
-        alt="HCC Signature"
-        style={{ display: 'none' }}
-        onError={e => { e.target.style.display = 'none'; }}
-      />
     </div>
   );
 }
@@ -1207,6 +1201,74 @@ function EditProfileModal({ profile, onClose, onSaved }) {
  * printed receipt and in the browser tab title, because all four read the same
  * shared settings (see lib/pharmacy.jsx).
  */
+/**
+ * One shop image (logo or signature) inside Pharmacy Settings: a preview, plus
+ * Upload / Replace and Remove.  Talks to /api/settings/branding/{kind}.
+ */
+function BrandingImageField({ kind, label, hint }) {
+  const [preview, setPreview] = useState(null);   // object URL, or null = none
+  const [busy, setBusy]       = useState(false);
+  const [err, setErr]         = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    loadBrandingImage(kind).then((r) => { if (alive) setPreview(r?.url ?? null); });
+    return () => { alive = false; };
+  }, [kind]);
+
+  async function refresh() {
+    clearBrandingCache(kind);
+    const r = await loadBrandingImage(kind);
+    setPreview(r?.url ?? null);
+  }
+
+  async function upload(e) {
+    const file = e.target.files[0];
+    e.target.value = '';                 // so the same file can be picked again
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { setErr('Too large — maximum 2 MB.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      await api.post(`/settings/branding/${kind}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await refresh();
+    } catch (ex) {
+      setErr(ex.response?.data?.detail || 'Upload failed.');
+    } finally { setBusy(false); }
+  }
+
+  async function remove() {
+    setBusy(true); setErr('');
+    try { await api.delete(`/settings/branding/${kind}`); await refresh(); }
+    catch (ex) { setErr(ex.response?.data?.detail || 'Could not remove.'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12, padding: 10, background: 'rgba(255,255,255,0.6)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#1e1b4b' }}>{label}</span>
+      <div style={{ height: 64, borderRadius: 8, background: '#fff', border: '1px dashed rgba(0,0,0,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {preview
+          ? <img src={preview} alt={label} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          : <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>None uploaded</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <label className="btn-secondary" style={{ flex: 1, textAlign: 'center', padding: '6px 8px', fontSize: 12, borderRadius: 8, cursor: busy ? 'wait' : 'pointer' }}>
+          {busy ? '…' : preview ? 'Replace' : 'Upload'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" onChange={upload} disabled={busy} style={{ display: 'none' }} />
+        </label>
+        {preview && (
+          <button className="btn-secondary" onClick={remove} disabled={busy} style={{ padding: '6px 8px', fontSize: 12, borderRadius: 8 }}>
+            Remove
+          </button>
+        )}
+      </div>
+      <span style={{ fontSize: 10.5, color: err ? '#e11d48' : 'var(--text-hint)' }}>{err || hint}</span>
+    </div>
+  );
+}
+
 function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
   const [form, setForm] = useState({
     pharmacy_name:      pharmacy?.pharmacy_name || '',
@@ -1306,6 +1368,16 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
         <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 14 }}>
           GSTIN and DL number are legally required on a pharmacy bill — they
           print on the receipt whenever they are filled in.
+        </div>
+
+        {/* The shop's own images — uploaded straight away (no need to press
+            Save), because they are files, not form fields. */}
+        <label style={modalLabel}>Logo &amp; signature</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
+          <BrandingImageField kind="logo" label="Shop logo"
+            hint="Square works best · PNG/JPG, max 2 MB" />
+          <BrandingImageField kind="signature" label="Signature"
+            hint="Sign on white paper, photograph it" />
         </div>
 
         {error && (

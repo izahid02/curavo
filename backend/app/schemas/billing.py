@@ -119,6 +119,11 @@ class InvoiceItemOut(BaseModel):
     id:             Optional[int] = None
     product_name:   str
     batch_number:   Optional[str]
+    # The medicine's own HSN code and THIS batch's expiry, for the printed tax
+    # invoice.  Before Nov 2026 neither was sent, so the PDF printed a fixed
+    # "30049099" for every line and could not show expiry at all.
+    hsn_code:       Optional[str]  = None
+    expiry_date:    Optional[date] = None
     quantity:       int
     # How many of this line have already been returned, and whether the whole
     # line is back.  The modal caps the "Return qty" box at quantity − returned_qty.
@@ -145,6 +150,7 @@ class InvoiceOut(BaseModel):
     invoice_number:  str
     invoice_date:    datetime
     patient_name:    str
+    patient_mobile:  Optional[str] = None   # printed under the patient's name
     items:           list[InvoiceItemOut]
     subtotal:        Decimal   # sum of all taxable_amounts
     discount_amount: Decimal

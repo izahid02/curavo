@@ -13,10 +13,13 @@ The PUT is a different matter and is locked to the owner.
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import mimetypes
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_branding_dir, get_db
 from app.models.settings import PharmacySettings
 from app.models.user import User
 from app.schemas.settings import PharmacySettingsOut, PharmacySettingsUpdate
@@ -98,3 +101,96 @@ def update_pharmacy_settings(
     db.commit()
     db.refresh(row)
     return row
+
+
+# ---------------------------------------------------------------------------
+# Shop logo and signature (printed on receipts and the A4 tax invoice)
+# ---------------------------------------------------------------------------
+#
+# Two images per shop, stored as files in the branding folder (the database
+# only ever holds text).  Reading needs a login; changing them is the same
+# Owner / Administrator decision as renaming the shop - the signature in
+# particular goes on every legal invoice.
+
+_BRANDING_KINDS = ("logo", "signature")
+_BRANDING_EXTS  = {"image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/webp": "webp"}
+_BRANDING_MAX_BYTES = 2 * 1024 * 1024     # 2 MB is plenty for a logo or a scanned signature
+
+
+def _branding_file(kind: str):
+    """The stored file for `kind`, whatever its extension, or None."""
+    for ext in ("png", "jpg", "webp"):
+        f = get_branding_dir() / f"{kind}.{ext}"
+        if f.exists():
+            return f
+    return None
+
+
+def _check_kind(kind: str) -> None:
+    # The kind arrives in the URL, so it is untrusted: only two exact words are
+    # allowed, which also means it can never be used to reach another folder.
+    if kind not in _BRANDING_KINDS:
+        raise HTTPException(status_code=404, detail="Unknown image.")
+
+
+@router.get("/branding")
+def branding_status(_user: User = Depends(get_current_user)):
+    """Which shop images are on file: {"logo": bool, "signature": bool}."""
+    return {k: _branding_file(k) is not None for k in _BRANDING_KINDS}
+
+
+@router.get("/branding/{kind}")
+def get_branding_image(kind: str, _user: User = Depends(get_current_user)):
+    """The shop's logo or signature image.  404 when none is uploaded."""
+    _check_kind(kind)
+    f = _branding_file(kind)
+    if f is None:
+        raise HTTPException(status_code=404, detail=f"No {kind} uploaded.")
+    return FileResponse(path=str(f), media_type=mimetypes.guess_type(str(f))[0] or "image/png",
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.post("/branding/{kind}")
+async def upload_branding_image(
+    kind: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload or replace the shop's logo / signature.  Owner / Administrator only."""
+    _check_kind(kind)
+    if current_user.role.name not in _SETTINGS_ADMIN_ROLES:
+        raise HTTPException(status_code=403,
+                            detail="Only an Owner or Administrator can change the shop's logo or signature.")
+
+    # Same permissive check as the profile photo: trust the MIME type when it
+    # is a known image type, otherwise fall back to the file extension.
+    ext = _BRANDING_EXTS.get(file.content_type or "")
+    if ext is None:
+        name_ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+        ext = {"png": "png", "jpg": "jpg", "jpeg": "jpg", "webp": "webp"}.get(name_ext)
+    if ext is None:
+        raise HTTPException(status_code=400, detail="Use a PNG, JPG or WebP image.")
+
+    data = await file.read()
+    if len(data) > _BRANDING_MAX_BYTES:
+        raise HTTPException(status_code=400,
+                            detail=f"Image too large ({len(data) // 1024} KB). Maximum is 2 MB.")
+
+    old = _branding_file(kind)              # a PNG -> JPG switch must not leave two files
+    if old is not None:
+        old.unlink()
+    (get_branding_dir() / f"{kind}.{ext}").write_bytes(data)
+    return {kind: True}
+
+
+@router.delete("/branding/{kind}")
+def delete_branding_image(kind: str, current_user: User = Depends(get_current_user)):
+    """Remove the shop's logo / signature.  Owner / Administrator only."""
+    _check_kind(kind)
+    if current_user.role.name not in _SETTINGS_ADMIN_ROLES:
+        raise HTTPException(status_code=403,
+                            detail="Only an Owner or Administrator can change the shop's logo or signature.")
+    f = _branding_file(kind)
+    if f is not None:
+        f.unlink()
+    return {kind: False}

@@ -33,6 +33,8 @@
 import '../../styles/thermal-print.css';
 import { formatDateTime as fmtDateTimeIST, formatDateOnly as fmtDateIST } from '../../lib/datetime';
 import { usePharmacy } from '../../lib/pharmacy.jsx';
+import { useEffect, useState } from 'react';
+import { loadBrandingImage } from '../../lib/branding';
 import ARZLogo from '../shared/ARZLogo';
 
 // ─── Small formatting helpers ────────────────────────────────────────────────
@@ -62,6 +64,15 @@ export default function ThermalReceipt({ receipt }) {
   // same hooks to run on every render, and `receipt` is null between sales.
   const { pharmacy } = usePharmacy();
 
+  // The shop's own uploaded logo (Pharmacy Settings).  None uploaded = the
+  // receipt simply starts with the shop name, as most thermal receipts do.
+  const [logoUrl, setLogoUrl] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    loadBrandingImage('logo').then((r) => { if (alive) setLogoUrl(r?.url ?? null); });
+    return () => { alive = false; };
+  }, []);
+
   // Nothing to show until a sale has been completed.
   if (!receipt) return null;
 
@@ -75,7 +86,7 @@ export default function ThermalReceipt({ receipt }) {
           Uppercased for the thermal printer, which has no bold and relies on
           caps for the one line that has to stand out. */}
       <div className="receipt-header">
-        <img src="/HCC_LOGO.png" alt="Logo" className="receipt-logo" />
+        {logoUrl && <img src={logoUrl} alt="" className="receipt-logo" />}
         <div className="receipt-shop-name">{pharmacy.pharmacy_name.toUpperCase()}</div>
         {pharmacy.pharmacy_tagline && (
           <div className="receipt-tagline">{pharmacy.pharmacy_tagline}</div>

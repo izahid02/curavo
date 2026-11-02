@@ -84,6 +84,23 @@ def get_prescriptions_dir() -> Path:
     return d
 
 
+def get_branding_dir() -> Path:
+    """
+    Return (and create if missing) the folder holding the SHOP's own images:
+    logo.<ext> and signature.<ext>, printed on receipts and tax invoices.
+
+    They used to be HCC_LOGO.png / HCC_SIGNATURE.png inside the app itself,
+    which put one shop's signature into every installer.  Now each shop
+    uploads its own from Pharmacy Settings.
+
+    Windows : C:/Users/<user>/AppData/Roaming/HCC/branding/
+    macOS   : ~/Library/Application Support/HCC/branding/
+    """
+    d = get_app_data_dir() / "branding"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_avatars_dir() -> Path:
     """
     Return (and create if missing) the folder where user profile photos are
