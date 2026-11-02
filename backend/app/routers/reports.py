@@ -29,6 +29,7 @@ from app.models.patients import Patient, patient_departments_table
 from app.models.user import User
 from app.services import costing
 from app.services.auth_service import get_current_user
+from app.services.licence import require_full_licence
 # The single definition of "how much actually stayed sold" after a partial
 # return.  Every revenue figure in this file goes through these.
 from app.services.revenue import (
@@ -37,7 +38,12 @@ from app.services.revenue import (
     sold_qty_expr,
 )
 
-router = APIRouter(prefix="/reports", tags=["Reports"])
+# Reports (and the PDF/Excel exports built from them) pause when the Curavo
+# subscription has lapsed - see services/licence.py.  Billing never does.
+router = APIRouter(
+    prefix="/reports", tags=["Reports"],
+    dependencies=[Depends(require_full_licence)],
+)
 
 
 # ---------------------------------------------------------------------------

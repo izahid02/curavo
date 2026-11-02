@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
 import { usePharmacy } from '../lib/pharmacy';
+import { LicenceLockedPanel, useLicence } from '../lib/licence.jsx';
 
 // ---------------------------------------------------------------------------
 // Indian currency formatter — ₹1,24,500
@@ -849,6 +850,7 @@ export default function Reports() {
   const [allData, setAllData] = useState(null);   // holds all 4 reports after generation
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const { restricted: licenceRestricted, refresh: refreshLicence } = useLicence();
 
   function applyPreset(preset) {
     const dates = getPresetDates(preset);
@@ -877,6 +879,9 @@ export default function Reports() {
       });
     } catch (err) {
       console.error('Report generation failed:', err);
+      // 402 = the subscription lapsed while this page was open.  Refreshing
+      // the shared status swaps the page for the "paused" panel below.
+      if (err?.response?.status === 402) { refreshLicence(); return; }
       setError(err?.response?.data?.detail || 'Failed to generate reports. Please try again.');
     } finally {
       setLoading(false);
@@ -891,6 +896,12 @@ export default function Reports() {
   function handleExportExcel() {
     if (!allData) return;
     generateExcel(activeTab, allData, dateFrom, dateTo).catch(console.error);
+  }
+
+  // Reports and their PDF/Excel exports pause when the Curavo subscription
+  // has lapsed (the server enforces it too - this just says so nicely).
+  if (licenceRestricted) {
+    return <LicenceLockedPanel what="Reports" />;
   }
 
   return (

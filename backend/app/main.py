@@ -45,6 +45,7 @@ from app.routers import expenditure as expenditure_router
 from app.routers import supplier_credit as supplier_credit_router
 from app.routers import settings as settings_router
 from app.routers import backup as backup_router
+from app.routers import licence as licence_router
 from app.routers import regulated as regulated_router
 
 
@@ -1202,6 +1203,10 @@ app.include_router(supplier_credit_router.router, prefix="/api")
 # the receipt both read it), PUT /api/settings/pharmacy (Owner/Admin only).
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(backup_router.router, prefix="/api")
+
+# Curavo subscription: GET /api/licence/status, POST /api/licence/activate.
+# The rules (30-day trial, 15-day grace, what pauses) are in services/licence.py.
+app.include_router(licence_router.router, prefix="/api")
 
 # Schedule H1 / MTP register: which medicines belong in it
 # (/api/regulated/candidates, /apply, /check) and the medicines with no

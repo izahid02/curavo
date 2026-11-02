@@ -720,6 +720,25 @@ Current stock of a product = SUM(quantity_available) across
   row while a file is being edited — which cost 4 of 5 backups the first time
   this was tested.
 
+
+**THE CURAVO SUBSCRIPTION IS CHECKED OFFLINE - services/licence.py.**
+  30-day free trial from first run -> paid licence key -> 15 days GRACE after
+  its end date -> RESTRICTED.  A trial that ends goes straight to restricted.
+  RESTRICTED pauses reports (+ their PDF/Excel exports), backup DOWNLOAD and
+  (later) the owner app, with HTTP 402 via the require_full_licence dependency.
+  ⚠ NEVER put require_full_licence on billing, stock, patients, the dashboard
+  or on TAKING backups.  A lapsed subscription must not stop a patient being
+  served or put the shop's data at risk - that was the decision, Nov 2026.
+  A key = JSON payload + Ed25519 signature by ARZ's PRIVATE key, which lives
+  only in ~/Projects/ARZ-licence-keys on Zahid's Mac (never in this repo; see
+  .gitignore).  The app embeds only the PUBLIC key (licence.PUBLIC_KEYS).
+  Each key is signed for one SHOP CODE (random, made on first run, stored in
+  licence_state inside pharmacy.db so a restored backup keeps it).
+  last_seen_on stops a clock turned back from reviving a trial or licence.
+  Keys are made with tools/licence/curavo_licence.py (issue --code --shop).
+  The frontend never computes dates: lib/licence.jsx shows what the server says.
+  Guard: backend/scripts/test_licence.py
+
 ---
 
 ## 5. Design system (glassmorphism — do not change without asking)
@@ -908,6 +927,15 @@ DELETE /api/backup/{file}           → delete one
   endpoint needs the JWT and a bare link cannot carry the header (401).
   Snapshots use sqlite3's online backup API, never copy2 — see the WAL rule
   in §4 for why that is not a style preference.
+
+### Licence (Curavo subscription)
+GET    /api/licence/status          → state TRIAL|ACTIVE|GRACE|EXPIRED, restricted,
+                                      locked_features, shop_code, days_left,
+                                      headline/detail (shown as-is), licensed_to,
+                                      valid_until, grace_ends_on.  Any logged-in user.
+POST   /api/licence/activate        → {key}.  Owner/Administrator only.  400 with a
+                                      plain-English reason for a bad, foreign,
+                                      ended or shorter key.
 
 ### Inventory
 GET    /api/inventory/categories    → list

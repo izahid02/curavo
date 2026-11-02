@@ -212,6 +212,9 @@ def init_db():
     # the same way; the products.register_category COLUMN that decides what
     # goes into it is an ALTER in main.py, as columns always are.
     import app.models.regulated          # noqa: F401
+    # Curavo subscription state (trial start, shop code, licence key).  A new
+    # TABLE, so it also arrives through create_all().
+    import app.models.licence            # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

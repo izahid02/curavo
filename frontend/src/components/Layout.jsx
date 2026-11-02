@@ -6,6 +6,7 @@ import { api, setAuthToken } from '../lib/api';
 import { usePharmacy } from '../lib/pharmacy.jsx';
 import { clearBrandingCache, loadBrandingImage } from '../lib/branding';
 import Icon from './shared/Icon';
+import { LicenceBanner, LicencePill, LicenceProvider, useLicence } from '../lib/licence.jsx';
 /** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
  *  in backend/app/routers/settings.py — the backend enforces it either way. */
 const PHARMACY_SETTINGS_ROLES = ['Owner', 'Administrator'];
@@ -386,6 +387,9 @@ export default function Layout() {
   const navClass = ({ isActive }) => `nav-item${isActive ? ' nav-item-active' : ''}`;
 
   return (
+    // LicenceProvider: the Curavo subscription status, shared with the banner,
+    // the header chip, the account menu and any page that gets paused (Reports).
+    <LicenceProvider role={profile?.role || user?.role_name}>
     <div style={{
       display: 'flex', height: '100vh', position: 'relative', zIndex: 1,
       padding: 20, gap: 20, boxSizing: 'border-box',
@@ -772,6 +776,9 @@ export default function Layout() {
             </span>
           )}
 
+          {/* "Free trial · 23 days left" - only during a trial that is not yet urgent */}
+          <LicencePill />
+
           {/* Account button — opens the dropdown menu.  Wrapped in an error
               boundary so a render fault here can never blank the whole app. */}
           <AccountMenuBoundary>
@@ -814,6 +821,9 @@ export default function Layout() {
           </button>
           </AccountMenuBoundary>
         </header>
+
+        {/* Subscription warning - only when something needs doing */}
+        <LicenceBanner />
 
         {/* Page content */}
         <main style={{
@@ -964,6 +974,10 @@ export default function Layout() {
               />
             )}
 
+            {/* Everyone can see the subscription state and the shop code;
+                only the owner/admin can paste a key (checked in the modal). */}
+            <LicenceMenuItem onPick={() => setAccountMenuOpen(false)} />
+
             <div style={{ height: '1px', background: 'rgba(99,102,241,0.1)', margin: '6px 0' }} />
 
             <MenuItem
@@ -1030,6 +1044,7 @@ export default function Layout() {
       )}
 
     </div>
+    </LicenceProvider>
   );
 }
 
@@ -1038,6 +1053,31 @@ export default function Layout() {
  * Small helper components used by the account menu / modals.
  * Kept in this file because they are only used here.
  * ═══════════════════════════════════════════════════════════════════════ */
+
+/** "Licence & subscription" row - opens the modal owned by LicenceProvider. */
+function LicenceMenuItem({ onPick }) {
+  const { status, openLicence } = useLicence();
+  const warn = status && (status.state === 'GRACE' || status.state === 'EXPIRED');
+  return (
+    <MenuItem
+      color="#1e1b4b"
+      hover="rgba(99,102,241,0.06)"
+      onClick={() => { onPick(); openLicence(); }}
+      icon={(
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.8">
+          <circle cx="8" cy="15" r="4" />
+          <path d="M10.8 12.2L20 3M16 7l3 3M14 9l2 2" />
+        </svg>
+      )}
+      label={(
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          Licence &amp; subscription
+          {warn && <span style={{ width: 7, height: 7, borderRadius: '50%', background: status.state === 'EXPIRED' ? 'var(--danger)' : 'var(--warn)' }} />}
+        </span>
+      )}
+    />
+  );
+}
 
 /** A single hoverable row in the account dropdown menu. */
 function MenuItem({ icon, label, onClick, color, hover }) {

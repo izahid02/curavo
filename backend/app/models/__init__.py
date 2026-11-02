@@ -22,3 +22,5 @@ from app.models.supplier_credit import (  # noqa: F401
 # Shop-wide identity (name, tagline, address, GSTIN, DL number).  One row, read
 # by the sidebar, the login screen, the receipt and the browser tab title.
 from app.models.settings import PharmacySettings  # noqa: F401
+# Curavo subscription (trial, shop code, licence key).  One row.
+from app.models.licence import LicenceState  # noqa: F401

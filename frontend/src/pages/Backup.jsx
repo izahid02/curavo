@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
+import { useLicence } from '../lib/licence.jsx';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -54,6 +55,9 @@ export default function Backup() {
   const [error,    setError]    = useState('');
   const [notice,   setNotice]   = useState('');
   const [confirm,  setConfirm]  = useState(null);   // filename pending delete
+  // Downloads pause when the Curavo subscription lapses; TAKING backups never
+  // does (a lapsed subscription must not put the shop's data at risk).
+  const { restricted, openLicence, refresh: refreshLicence } = useLicence();
 
   const fetchBackups = useCallback(async () => {
     try {
@@ -114,6 +118,8 @@ export default function Backup() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
+      // 402 = subscription lapsed: show the licence screen, not an error.
+      if (err.response?.status === 402) { refreshLicence(); openLicence(); return; }
       setError(err.response?.data?.detail || 'Download failed.');
     }
   }
@@ -222,8 +228,9 @@ export default function Backup() {
                     <td style={{ padding: '10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button
                         className="btn-secondary"
-                        onClick={() => downloadBackup(b.filename)}
-                        style={{ fontSize: 12, padding: '5px 10px', marginRight: 6 }}
+                        onClick={() => (restricted ? openLicence() : downloadBackup(b.filename))}
+                        title={restricted ? 'Paused - the Curavo subscription has ended. Backups are still being taken.' : undefined}
+                        style={{ fontSize: 12, padding: '5px 10px', marginRight: 6, opacity: restricted ? 0.55 : 1 }}
                       >
                         Download
                       </button>

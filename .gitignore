@@ -36,6 +36,15 @@ frontend/src-tauri/hcc-backend-*
 .env
 *.env.local
 
+# --- Curavo licence signing key -------------------------------------------
+# ARZ's PRIVATE key makes licence keys.  It lives OUTSIDE this repo
+# (~/Projects/ARZ-licence-keys).  These lines are a safety net in case a copy
+# is ever dropped in here by mistake: it must never reach GitHub.
+arz_licence_private*
+*.pem
+ARZ-licence-keys/
+issued.csv
+
 # --- OS junk ---------------------------------------------------------------
 .DS_Store
 Thumbs.db

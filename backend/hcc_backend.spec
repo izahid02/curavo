@@ -26,8 +26,11 @@ binaries = []
 # build falls back to CSV while the dev machine produces .xlsx -- the export
 # still works, which is worse: the difference is silent and only shows up on
 # the pharmacy's PC.
+# cryptography checks Curavo licence keys (services/licence.py imports its
+# Ed25519 module directly, which jose alone never pulls into the bundle).
 for pkg in ("fastapi", "starlette", "pydantic", "pydantic_settings",
-            "uvicorn", "sqlalchemy", "jose", "bcrypt", "openpyxl"):
+            "uvicorn", "sqlalchemy", "jose", "bcrypt", "openpyxl",
+            "cryptography"):
     _d, _b, _h = collect_all(pkg)
     datas += _d
     binaries += _b

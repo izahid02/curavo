@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse
 from app.database import get_app_data_dir
 from app.models.user import User
 from app.services.auth_service import get_current_user
+from app.services.licence import require_full_licence
 
 router = APIRouter(prefix="/backup", tags=["Backup"])
 
@@ -180,12 +181,16 @@ def list_backups(current_user: User = Depends(get_current_user)):
     }
 
 
-@router.get("/download/{filename}")
+@router.get("/download/{filename}", dependencies=[Depends(require_full_licence)])
 def download_backup(filename: str, current_user: User = Depends(get_current_user)):
     """
     Download one backup.  This is how a copy gets OFF the shop PC and onto a
     pen drive or email — a backup sitting on the same disk as the database does
     not survive that disk failing.
+
+    Pauses when the Curavo subscription has lapsed (require_full_licence).
+    Taking backups - automatic and Backup Now - never does: a lapsed
+    subscription must not put the shop's data at risk.
     """
     _require_admin(current_user)
     path = _safe_backup_path(filename)
