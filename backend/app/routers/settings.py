@@ -32,7 +32,7 @@ _SETTINGS_ADMIN_ROLES = {"Owner", "Administrator"}
 
 # The defaults a brand-new install starts with.  Kept here (not only in the
 # model) so the lazy get-or-create below reads in one place.
-DEFAULT_NAME    = "Health Care Centre"
+DEFAULT_NAME    = "My Pharmacy"
 DEFAULT_TAGLINE = "Pharmacy & Medical Store"
 
 
@@ -85,6 +85,7 @@ def update_pharmacy_settings(
     row.pharmacy_name = body.pharmacy_name.strip()
     # For the optional fields, a blank string means "clear it" — storing NULL
     # rather than "" keeps every reader's `value or fallback` check honest.
+    row.pharmacy_name_as   = (body.pharmacy_name_as or "").strip() or None
     row.invoice_name       = (body.invoice_name or "").strip() or None
     row.pharmacy_tagline   = (body.pharmacy_tagline or "").strip() or None
     row.pharmacy_address   = (body.pharmacy_address or "").strip() or None

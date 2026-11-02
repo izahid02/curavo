@@ -1210,6 +1210,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
 function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
   const [form, setForm] = useState({
     pharmacy_name:      pharmacy?.pharmacy_name || '',
+    pharmacy_name_as:   pharmacy?.pharmacy_name_as || '',
     invoice_name:       pharmacy?.invoice_name || '',
     pharmacy_tagline:   pharmacy?.pharmacy_tagline || '',
     pharmacy_address:   pharmacy?.pharmacy_address || '',
@@ -1256,7 +1257,14 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
         <label style={modalLabel}>Name *</label>
         <input style={modalInput} value={form.pharmacy_name}
           onChange={(e) => set('pharmacy_name', e.target.value)}
-          placeholder="Health Care Centre" />
+          placeholder="e.g. Sunrise Medicos" />
+
+        {/* Used in ASSAMESE patient messages (follow-ups, reminders).
+            Blank = those messages use the name above. */}
+        <label style={modalLabel}>Shop name in Assamese</label>
+        <input style={modalInput} value={form.pharmacy_name_as}
+          onChange={(e) => set('pharmacy_name_as', e.target.value)}
+          placeholder="e.g. স্বাস্থ্য সেৱা কেন্দ্ৰ — leave blank to use the name above" />
 
         {/* Optional — only needed when the tax invoice must carry a different
             name from the sign (legal name for the GSTIN, "M/S …", etc.). */}

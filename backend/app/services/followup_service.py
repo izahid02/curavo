@@ -21,6 +21,7 @@ from app.models.followup import (
 from app.models.patients import Patient
 from app.models.inventory import Product
 from app.utils.dates import get_today_ist
+from app.services.shop_identity import shop_vars
 from app.schemas.followup import (
     FollowUpScheduleOut, MessageQueueOut, PatientResponseCreate,
     PatientResponseOut, FollowUpStatsOut, ResponseSummaryOut,
@@ -124,6 +125,8 @@ def schedule_follow_ups(db: Session, invoice_id: int, patient_id: int) -> None:
         "purchase_date": invoice_date_str,
         # medicine_name is the same as medicine_list here (used in refill template)
         "medicine_name": medicine_list,
+        # {shop_name} / {shop_name_as} / {shop_phone} — this shop, from settings
+        **shop_vars(db),
     }
 
     # The base date for scheduling is today (invoice creation date), in IST.
@@ -554,9 +557,10 @@ def compose_message(
 
     # --- No template found at all — return a minimal placeholder ---
     if template is None:
+        shop = shop_vars(db)
         placeholder = (
-            f"Dear {patient.name}, this is a follow-up from Health Care Centre. "
-            "Please call us at 6001666271 if you have any questions."
+            f"Dear {patient.name}, this is a follow-up from {shop['shop_name']}. "
+            f"Please call us at {shop['shop_phone']} if you have any questions."
         )
         return ComposeMessageOut(
             english      = placeholder if language.lower() != "as" else None,
@@ -567,7 +571,7 @@ def compose_message(
         )
 
     # --- Render placeholders ---
-    replacements = {"patient_name": patient.name}
+    replacements = {"patient_name": patient.name, **shop_vars(db)}
 
     def render(body: Optional[str]) -> Optional[str]:
         if not body:

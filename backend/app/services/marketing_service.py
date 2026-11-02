@@ -284,9 +284,8 @@ def queue_campaign(db: Session, campaign_id: int, user_id: int) -> CampaignOut:
     # {shop_name} is the shop's OWN name from Pharmacy Settings.  It used to be
     # the fixed text "Health Care Centre", which would have had every other
     # pharmacy's patients receive messages signed by the wrong shop.
-    from app.models.settings import PharmacySettings
-    settings_row = db.query(PharmacySettings).first()
-    shop_name = settings_row.pharmacy_name if settings_row else "your pharmacy"
+    from app.services.shop_identity import shop_vars
+    shop = shop_vars(db)
 
     for patient in patients:
         for msg in campaign.messages:
@@ -294,7 +293,9 @@ def queue_campaign(db: Session, campaign_id: int, user_id: int) -> CampaignOut:
             body = (
                 msg.message_body
                 .replace("{patient_name}", patient.name)
-                .replace("{shop_name}", shop_name)
+                .replace("{shop_name_as}", shop["shop_name_as"])
+                .replace("{shop_name}", shop["shop_name"])
+                .replace("{shop_phone}", shop["shop_phone"])
             )
 
             # Track recipient in campaign_recipients

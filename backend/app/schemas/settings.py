@@ -16,6 +16,7 @@ class PharmacySettingsOut(BaseModel):
     """The shop's identity, as returned by GET /api/settings/pharmacy."""
     id:                 int
     pharmacy_name:      str
+    pharmacy_name_as:   Optional[str] = None
     invoice_name:       Optional[str] = None
     pharmacy_tagline:   Optional[str] = None
     pharmacy_address:   Optional[str] = None
@@ -38,6 +39,7 @@ class PharmacySettingsUpdate(BaseModel):
     than defaulted to the current value.
     """
     pharmacy_name:      str = Field(..., min_length=1, max_length=150)
+    pharmacy_name_as:   Optional[str] = Field(default=None, max_length=150)
     invoice_name:       Optional[str] = Field(default=None, max_length=150)
     pharmacy_tagline:   Optional[str] = Field(default=None, max_length=150)
     pharmacy_address:   Optional[str] = None

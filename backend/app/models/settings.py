@@ -27,12 +27,15 @@ class PharmacySettings(Base):
     id               = Column(Integer, primary_key=True, index=True)
     # Everything below is nullable / defaulted so a half-filled form is a valid
     # row.  A pharmacy that has not entered its GSTIN yet still needs a name.
-    pharmacy_name    = Column(String(150), nullable=False, default="Health Care Centre")
+    pharmacy_name    = Column(String(150), nullable=False, default="My Pharmacy")
     # The name printed on TAX INVOICES, when it differs from the friendly shop
     # name above — e.g. the legal/registered name that goes with the GSTIN, or a
     # house style such as "M/S HEALTH CARE CENTER".  Printed exactly as typed.
     # NULL = print pharmacy_name in capitals.  (Added Nov 2026 for Curavo.)
     invoice_name     = Column(String(150), nullable=True)
+    # The shop name in Assamese script, used in Assamese patient messages
+    # (e.g. HCC = "স্বাস্থ্য সেৱা কেন্দ্ৰ").  NULL = use pharmacy_name.
+    pharmacy_name_as = Column(String(150), nullable=True)
     pharmacy_tagline = Column(String(150), nullable=True,  default="Pharmacy & Medical Store")
     pharmacy_address = Column(Text,        nullable=True)
     pharmacy_phone   = Column(String(40),  nullable=True)

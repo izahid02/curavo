@@ -484,6 +484,10 @@ def _run_db_migrations() -> None:
         # existing row, which means "print the shop name in capitals" — so an
         # upgraded shop's invoices change only if the owner fills it in.
         "ALTER TABLE pharmacy_settings ADD COLUMN invoice_name VARCHAR(150)",
+
+        # Shop name in Assamese, for Assamese patient messages (Curavo, Nov
+        # 2026).  NULL = Assamese messages use the ordinary shop name.
+        "ALTER TABLE pharmacy_settings ADD COLUMN pharmacy_name_as VARCHAR(150)",
     ]
 
     db = SessionLocal()
@@ -601,8 +605,11 @@ def _seed_pharmacy_settings() -> None:
 
         existing = db.query(PharmacySettings).first()
         if existing is None:
+            # A NEW install starts as "My Pharmacy" (it used to start as HCC).
+            # Only ever runs on an empty table, so an existing shop's name is
+            # never touched.
             db.add(PharmacySettings(
-                pharmacy_name="Health Care Centre",
+                pharmacy_name="My Pharmacy",
                 pharmacy_tagline="Pharmacy & Medical Store",
             ))
             db.commit()
@@ -663,6 +670,12 @@ def _seed_message_templates() -> None:
       tag_filter  — patient tag that prefers this template (NULL = general)
       body_en     — English text with {patient_name} placeholder
       body_as     — Assamese text with {patient_name} placeholder
+
+    The shop's own name and phone are PLACEHOLDERS too - {shop_name},
+    {shop_name_as}, {shop_phone} - filled from Pharmacy Settings by
+    services/shop_identity.py when a message is queued.  These templates
+    are upserted on every start, so a shop's name or phone must never be
+    typed in here: it would overwrite every other shop's messages too.
       is_active   — 1 = live, 0 = soft-disabled
     """
     db = SessionLocal()
@@ -684,16 +697,16 @@ def _seed_message_templates() -> None:
                 is_active  = 1,
                 body_en = (
                     "Dear {patient_name}, we hope you are feeling better after your "
-                    "recent visit to Health Care Centre. Please remember to take your "
-                    "medicines on time. Call us at 6001666271 if you have any questions."
+                    "recent visit to {shop_name}. Please remember to take your "
+                    "medicines on time. Call us at {shop_phone} if you have any questions."
                 ),
                 body_as = (
-                    "প্ৰিয় {patient_name}, স্বাস্থ্য সেৱা কেন্দ্ৰলৈ আপোনাৰ শেহতীয়া "
+                    "প্ৰিয় {patient_name}, {shop_name_as}লৈ আপোনাৰ শেহতীয়া "
                     "আগমনৰ পিছত আপুনি সুস্থ হৈ আছে বুলি আশা কৰোঁ। সময়মতে "
-                    "ঔষধ খাবলৈ মনত ৰাখিব। যিকোনো প্ৰশ্নৰ বাবে 6001666271 "
+                    "ঔষধ খাবলৈ মনত ৰাখিব। যিকোনো প্ৰশ্নৰ বাবে {shop_phone} "
                     "নম্বৰত ফোন কৰক।"
                 ),
-                variables = "{patient_name}",
+                variables = "{patient_name}, {shop_name}, {shop_name_as}, {shop_phone}",
             ),
             # ── Day 2 — Diabetic variant ────────────────────────────────────
             dict(
@@ -707,15 +720,15 @@ def _seed_message_templates() -> None:
                 body_en = (
                     "Dear {patient_name}, we hope you are managing well after starting "
                     "your diabetes medicines. Remember to check your blood sugar regularly. "
-                    "Call 6001666271 anytime."
+                    "Call {shop_phone} anytime."
                 ),
                 body_as = (
                     "প্ৰিয় {patient_name}, আশা কৰোঁ আপুনি ডায়েবেটিছৰ "
                     "ঔষধ আৰম্ভ কৰাৰ পিছত ভালে আছে। নিয়মিতভাৱে "
                     "ৰক্তশৰ্কৰা পৰীক্ষা কৰিবলৈ মনত ৰাখিব। "
-                    "6001666271 ত যিকোনো সময়তে ফোন কৰক।"
+                    "{shop_phone} ত যিকোনো সময়তে ফোন কৰক।"
                 ),
-                variables = "{patient_name}",
+                variables = "{patient_name}, {shop_name}, {shop_name_as}, {shop_phone}",
             ),
             # ── Day 5 — General ────────────────────────────────────────────────
             dict(
@@ -727,16 +740,16 @@ def _seed_message_templates() -> None:
                 tag_filter = None,
                 is_active  = 1,
                 body_en = (
-                    "Dear {patient_name}, this is a reminder from Health Care Centre. "
+                    "Dear {patient_name}, this is a reminder from {shop_name}. "
                     "Hope your treatment is going well. If you are running low on medicines, "
-                    "visit us or call 6001666271."
+                    "visit us or call {shop_phone}."
                 ),
                 body_as = (
-                    "প্ৰিয় {patient_name}, এইটো স্বাস্থ্য সেৱা কেন্দ্ৰৰ পৰা এটা "
+                    "প্ৰিয় {patient_name}, এইটো {shop_name_as}ৰ পৰা এটা "
                     "সোঁৱৰণি। আশা কৰোঁ আপোনাৰ চিকিৎসা ভালদৰে চলি আছে। "
-                    "ঔষধ শেষ হ'লে আমাৰ ওচৰলৈ আহক বা 6001666271 ত ফোন কৰক।"
+                    "ঔষধ শেষ হ'লে আমাৰ ওচৰলৈ আহক বা {shop_phone} ত ফোন কৰক।"
                 ),
-                variables = "{patient_name}",
+                variables = "{patient_name}, {shop_name}, {shop_name_as}, {shop_phone}",
             ),
             # ── Day 10 — General ───────────────────────────────────────────────
             dict(
@@ -748,16 +761,16 @@ def _seed_message_templates() -> None:
                 tag_filter = None,
                 is_active  = 1,
                 body_en = (
-                    "Dear {patient_name}, checking in from Health Care Centre. "
+                    "Dear {patient_name}, checking in from {shop_name}. "
                     "Please ensure you have completed your course of medicines. "
-                    "For refills or any concerns, call us at 6001666271."
+                    "For refills or any concerns, call us at {shop_phone}."
                 ),
                 body_as = (
-                    "প্ৰিয় {patient_name}, স্বাস্থ্য সেৱা কেন্দ্ৰৰ পৰা খবৰ লৈছোঁ। "
+                    "প্ৰিয় {patient_name}, {shop_name_as}ৰ পৰা খবৰ লৈছোঁ। "
                     "অনুগ্ৰহ কৰি আপোনাৰ ঔষধৰ কোৰ্ছ সম্পূৰ্ণ কৰক। ঔষধ "
-                    "নবীকৰণ বা যিকোনো সমস্যাৰ বাবে 6001666271 ত ফোন কৰক।"
+                    "নবীকৰণ বা যিকোনো সমস্যাৰ বাবে {shop_phone} ত ফোন কৰক।"
                 ),
-                variables = "{patient_name}",
+                variables = "{patient_name}, {shop_name}, {shop_name_as}, {shop_phone}",
             ),
             # ── Day 30 — General ───────────────────────────────────────────────
             dict(
@@ -770,15 +783,15 @@ def _seed_message_templates() -> None:
                 is_active  = 1,
                 body_en = (
                     "Dear {patient_name}, it has been a month since your last visit to "
-                    "Health Care Centre. If you need a refill for your regular medicines, "
-                    "we are here to help. Call 6001666271."
+                    "{shop_name}. If you need a refill for your regular medicines, "
+                    "we are here to help. Call {shop_phone}."
                 ),
                 body_as = (
                     "প্ৰিয় {patient_name}, আপোনাৰ শেষ আগমনৰ পৰা এমাহ হ'ল। "
                     "যদি আপোনাৰ নিয়মীয়া ঔষধৰ বাবে নবীকৰণৰ প্ৰয়োজন, "
-                    "আমি সহায় কৰিবলৈ আছোঁ। 6001666271 ত ফোন কৰক।"
+                    "আমি সহায় কৰিবলৈ আছোঁ। {shop_phone} ত ফোন কৰক।"
                 ),
-                variables = "{patient_name}",
+                variables = "{patient_name}, {shop_name}, {shop_name_as}, {shop_phone}",
             ),
             # ── Refill Reminder ────────────────────────────────────────────────
             dict(
@@ -791,13 +804,13 @@ def _seed_message_templates() -> None:
                 is_active  = 1,
                 body_en = (
                     "Dear {patient_name}, your {medicine_name} supply may be running low. "
-                    "Please visit Health Care Centre to refill your prescription. "
-                    "Call us at 6001666271."
+                    "Please visit {shop_name} to refill your prescription. "
+                    "Call us at {shop_phone}."
                 ),
                 body_as = (
                     "প্ৰিয় {patient_name}, আপোনাৰ {medicine_name} শেষ হ'ব পাৰে। "
-                    "অনুগ্ৰহ কৰি স্বাস্থ্য সেৱা কেন্দ্ৰত আপোনাৰ "
-                    "প্ৰেছক্ৰিপশন পূৰণ কৰিবলৈ আহক। 6001666271 ত ফোন কৰক।"
+                    "অনুগ্ৰহ কৰি {shop_name_as}ত আপোনাৰ "
+                    "প্ৰেছক্ৰিপশন পূৰণ কৰিবলৈ আহক। {shop_phone} ত ফোন কৰক।"
                 ),
                 variables = "{patient_name},{medicine_name}",
             ),
@@ -1095,7 +1108,7 @@ async def lifespan(_app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="Health Care Centre ERP",
+    title="Curavo API",
     description="Pharmacy ERP & OPD Management System — Phase 1",
     version="0.1.0",
     lifespan=lifespan,

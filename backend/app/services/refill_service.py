@@ -23,6 +23,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, selectinload
 
+from app.services.shop_identity import shop_vars
+
 from app.models.billing import Invoice, InvoiceItem
 from app.models.followup import MessageQueue, MessageTemplate
 from app.models.inventory import Product
@@ -171,6 +173,7 @@ def schedule_refill_reminder(db: Session, invoice_id: int, patient_id: int) -> N
         replacements = {
             "patient_name": patient.name,
             "medicine_name": product.name,
+            **shop_vars(db),      # {shop_name} / {shop_name_as} / {shop_phone}
         }
 
         def _render(body: str) -> str:

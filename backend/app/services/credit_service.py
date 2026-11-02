@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models.credit import CreditAccount, CreditReminder, CreditTransaction
 from app.models.patients import Patient
+from app.services.shop_identity import shop_vars
 
 logger = logging.getLogger(__name__)
 
@@ -27,51 +28,54 @@ logger = logging.getLogger(__name__)
 # Message template helpers
 # ---------------------------------------------------------------------------
 
-PHONE = "6001666271"
+# The shop name / phone in these reminders come from Pharmacy Settings via
+# services/shop_identity.py (they used to be HCC's, typed in here).
 
 
-def _render_messages(patient_name: str, amount: Decimal, due_date: date, remind_type: str):
+def _render_messages(patient_name: str, amount: Decimal, due_date: date, remind_type: str,
+                     shop: dict):
     """
     Return (message_en, message_as) for the given reminder type.
 
     All three reminder types get the pharmacy phone number embedded so the
     patient can call without searching for it.
     """
+    name, name_as, phone = shop["shop_name"], shop["shop_name_as"], shop["shop_phone"]
     amount_str = f"₹{amount:,.0f}"
     date_str   = due_date.strftime("%d %b %Y")
 
     if remind_type == "3_DAYS_BEFORE":
         en = (
-            f"Dear {patient_name}, your payment of {amount_str} to Health Care "
-            f"Centre is due on {date_str}. Please arrange payment. "
-            f"Call {PHONE} for help."
+            f"Dear {patient_name}, your payment of {amount_str} to {name} "
+            f"is due on {date_str}. Please arrange payment. "
+            f"Call {phone} for help."
         )
         as_ = (
-            f"প্ৰিয় {patient_name}, স্বাস্থ্য সেৱা কেন্দ্ৰলৈ আপোনাৰ {amount_str} "
+            f"প্ৰিয় {patient_name}, {name_as}লৈ আপোনাৰ {amount_str} "
             f"পৰিশোধৰ তাৰিখ {date_str}। অনুগ্ৰহ কৰি পৰিশোধৰ ব্যৱস্থা কৰক। "
-            f"সহায়ৰ বাবে {PHONE} ত ফোন কৰক।"
+            f"সহায়ৰ বাবে {phone} ত ফোন কৰক।"
         )
 
     elif remind_type == "DUE_DATE":
         en = (
-            f"Dear {patient_name}, your payment of {amount_str} to Health Care "
-            f"Centre is due TODAY. Please visit us or call {PHONE}."
+            f"Dear {patient_name}, your payment of {amount_str} to {name} "
+            f"is due TODAY. Please visit us or call {phone}."
         )
         as_ = (
-            f"প্ৰিয় {patient_name}, স্বাস্থ্য সেৱা কেন্দ্ৰলৈ আপোনাৰ {amount_str} "
-            f"পৰিশোধৰ তাৰিখ আজি। অনুগ্ৰহ কৰি আমাৰ ওচৰলৈ আহক বা {PHONE} ত ফোন কৰক।"
+            f"প্ৰিয় {patient_name}, {name_as}লৈ আপোনাৰ {amount_str} "
+            f"পৰিশোধৰ তাৰিখ আজি। অনুগ্ৰহ কৰি আমাৰ ওচৰলৈ আহক বা {phone} ত ফোন কৰক।"
         )
 
     else:  # 2_DAYS_AFTER
         en = (
-            f"Dear {patient_name}, your payment of {amount_str} to Health Care "
-            f"Centre was due on {date_str} and is now overdue. Please clear your "
-            f"dues. Call {PHONE}."
+            f"Dear {patient_name}, your payment of {amount_str} to {name} "
+            f"was due on {date_str} and is now overdue. Please clear your "
+            f"dues. Call {phone}."
         )
         as_ = (
-            f"প্ৰিয় {patient_name}, স্বাস্থ্য সেৱা কেন্দ্ৰলৈ আপোনাৰ {amount_str} "
+            f"প্ৰিয় {patient_name}, {name_as}লৈ আপোনাৰ {amount_str} "
             f"পৰিশোধৰ তাৰিখ {date_str} আছিল আৰু এতিয়া বাকী আছে। অনুগ্ৰহ কৰি "
-            f"বকেয়া পৰিশোধ কৰক। {PHONE} ত ফোন কৰক।"
+            f"বকেয়া পৰিশোধ কৰক। {phone} ত ফোন কৰক।"
         )
 
     return en, as_
@@ -150,7 +154,7 @@ def create_credit_transaction(
 
     for remind_type, remind_date in reminder_schedule:
         msg_en, msg_as = _render_messages(
-            patient.name, credit_amount, due_date, remind_type
+            patient.name, credit_amount, due_date, remind_type, shop_vars(db)
         )
         db.add(CreditReminder(
             credit_tx_id=tx.id,
@@ -852,7 +856,7 @@ def reschedule_reminders(db: Session, tx: CreditTransaction) -> None:
     ]
     for remind_type, remind_date in schedule:
         msg_en, msg_as = _render_messages(
-            patient.name, tx.amount, tx.due_date, remind_type
+            patient.name, tx.amount, tx.due_date, remind_type, shop_vars(db)
         )
         db.add(CreditReminder(
             credit_tx_id=tx.id,

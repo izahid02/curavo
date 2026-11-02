@@ -27,7 +27,8 @@ import { api } from './api';
 /** What every screen falls back to before the real settings arrive. */
 export const DEFAULT_PHARMACY = {
   id: null,
-  pharmacy_name: 'Health Care Centre',
+  pharmacy_name: 'My Pharmacy',
+  pharmacy_name_as: null,
   invoice_name: null,
   pharmacy_tagline: 'Pharmacy & Medical Store',
   pharmacy_address: null,
