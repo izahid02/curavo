@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Curavo Pharmacy Software</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Curavo is pharmacy billing and stock software for Indian medical stores. GST invoices, batch-wise stock, expiry returns and the Schedule H1 register. Works without internet. 30-day free trial.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the shop counter. Text on the left, the real Curavo screen on the right;
+   each section pairs one job at the counter with the screen that does it.
+   One light look on purpose: it is the app's own glass-and-pastel world. */
+:root {
+  --paper:  #f5f6fd;                 /* page ground, a faint lavender white */
+  --ink:    #1e1b4b;                 /* text, the app's own deep indigo */
+  --ink-2:  #4b5068;                 /* secondary text, indigo-biased grey */
+  --accent: #4f46e5;                 /* buttons, links (AA on white) */
+  --accent-soft: rgba(99,102,241,0.12);
+  --mint:   #0f9f78;                 /* the logo ribbon, darkened for text */
+  --mint-soft: rgba(110,231,183,0.22);
+  --line:   rgba(30,27,75,0.10);
+  --glass:  rgba(255,255,255,0.62);
+  --glass-strong: rgba(255,255,255,0.82);
+  --warn:   #b45309;
+  --font-display: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  --r: 14px; --r-lg: 22px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; background: var(--paper); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; transition: none !important; } }
+body {
+  margin: 0; font-family: var(--font-body); color: var(--ink); font-size: 17px; line-height: 1.6;
+  background:
+    radial-gradient(900px 520px at 85% -10%, rgba(165,180,252,0.45), transparent 70%),
+    radial-gradient(700px 480px at -10% 30%, rgba(110,231,183,0.22), transparent 70%),
+    radial-gradient(800px 600px at 110% 70%, rgba(249,168,212,0.22), transparent 70%),
+    var(--paper);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); }
+img { max-width: 100%; height: auto; display: block; }
+:focus-visible { outline: 3px solid rgba(79,70,229,0.45); outline-offset: 3px; border-radius: 6px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.12; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+h2 { font-size: clamp(30px, 3.6vw, 44px); font-weight: 600; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+p { margin: 0; }
+.lede { font-size: clamp(17px, 1.5vw, 19px); color: var(--ink-2); max-width: 60ch; }
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.ph { background: #fef3c7; color: #92400e; border-radius: 4px; padding: 0 4px; font-family: var(--font-mono); font-size: 0.9em; white-space: nowrap; }
+
+/* ---------- header ---------- */
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); background: rgba(245,246,253,0.78); border-bottom: 1px solid var(--line); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: rgba(245,246,253,0.95); }
+.top .wrap { display: flex; align-items: center; gap: 24px; padding-block: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
+.brand svg { width: 34px; height: 34px; flex-shrink: 0; }
+.top nav { display: flex; gap: 22px; margin-left: auto; }
+.top nav a { color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500; }
+.top nav a:hover { color: var(--ink); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: 600 15px/1 var(--font-body); padding: 13px 20px; border-radius: 12px; text-decoration: none; border: 1px solid transparent; cursor: pointer; transition: transform .15s, box-shadow .15s, background .15s; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 22px rgba(79,70,229,0.30); }
+.btn-primary:hover { background: #4338ca; transform: translateY(-1px); }
+.btn-ghost { background: var(--glass-strong); color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { background: #fff; }
+.top .btn { padding: 10px 16px; font-size: 14px; }
+@media (max-width: 860px) { .top nav { display: none; } .top .btn { margin-left: auto; } }
+
+/* ---------- hero ---------- */
+.hero { padding-block: clamp(40px, 6vw, 80px) 40px; }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(28px, 4vw, 56px); align-items: center; }
+.hero h1 { font-size: clamp(36px, 4.3vw, 56px); font-weight: 650; }
+.hero h1 em { font-style: normal; color: var(--mint); }
+.hero .lede { margin-top: 18px; }
+.hero .ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+.hero .fine { margin-top: 14px; font-size: 14px; color: var(--ink-2); }
+.shot { position: relative; }
+.frame { border-radius: var(--r-lg); background: var(--glass); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 30px 80px rgba(30,27,75,0.16), 0 2px 0 rgba(255,255,255,0.8) inset; padding: 8px; }
+.frame img { border-radius: 16px; }
+.receipt { position: absolute; left: -26px; bottom: -28px; width: min(320px, 70%); background: #fff; border-radius: 12px; box-shadow: 0 18px 40px rgba(30,27,75,0.18); padding: 14px 16px 12px; font-family: var(--font-mono); font-size: 12px; color: var(--ink); border: 1px solid var(--line); }
+.receipt .r-head { display: flex; justify-content: space-between; font-family: var(--font-body); font-weight: 600; font-size: 12px; letter-spacing: 0.12em; color: var(--accent); margin-bottom: 8px; }
+.receipt .r-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 6px 0; border-top: 1px dashed var(--line); }
+.receipt .r-row b { font-weight: 500; }
+.receipt .r-row span { color: var(--ink-2); font-size: 11px; grid-column: 1 / -1; }
+.receipt .r-total { display: flex; justify-content: space-between; border-top: 1.5px solid var(--ink); margin-top: 4px; padding-top: 8px; font-weight: 500; font-size: 13px; }
+@media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; } .receipt { position: static; width: 100%; margin-top: 14px; } }
+
+/* ---------- proof strip ---------- */
+.strip { padding-block: 36px 8px; }
+.strip ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.strip li { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border-radius: var(--r); background: var(--glass); border: 1px solid rgba(255,255,255,0.85); }
+.strip svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--accent); margin-top: 2px; }
+.strip b { display: block; font-weight: 600; font-size: 15.5px; }
+.strip span { font-size: 14px; color: var(--ink-2); line-height: 1.45; display: block; }
+@media (max-width: 900px) { .strip ul { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .strip ul { grid-template-columns: 1fr; } }
+
+/* ---------- feature rows ---------- */
+section.row { padding-block: clamp(56px, 7vw, 96px) 0; }
+.row .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: clamp(28px, 4.5vw, 64px); align-items: center; }
+.row.flip .wrap { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+.row.flip .copy { order: 2; }
+.copy { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ticks { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 10px; }
+.ticks li { position: relative; padding-left: 28px; color: var(--ink); font-size: 16px; }
+.ticks li::before { content: ""; position: absolute; left: 0; top: 7px; width: 16px; height: 10px; border-left: 2.5px solid var(--mint); border-bottom: 2.5px solid var(--mint); transform: rotate(-45deg) scale(0.85); }
+.ticks .mono { color: var(--ink-2); }
+@media (max-width: 900px) { .row .wrap, .row.flip .wrap { grid-template-columns: 1fr; } .row.flip .copy { order: 0; } }
+
+.example { margin-top: 6px; border-radius: var(--r); background: var(--mint-soft); padding: 14px 16px; font-size: 15px; }
+.example .mono { color: var(--ink); }
+
+/* ---------- smaller features grid ---------- */
+.more { padding-block: clamp(64px, 8vw, 110px) 0; }
+.more .head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tile { background: var(--glass); border: 1px solid rgba(255,255,255,0.85); border-radius: var(--r); padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+.tile p { color: var(--ink-2); font-size: 15.5px; }
+.tile .tag { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mint); }
+@media (max-width: 900px) { .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .grid3 { grid-template-columns: 1fr; } }
+
+/* ---------- pricing ---------- */
+.pricing { padding-block: clamp(64px, 8vw, 110px) 0; }
+.pricing .head { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 34px; }
+.plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; max-width: 1000px; margin: 0 auto; }
+.plan { background: var(--glass); border: 1px solid rgba(255,255,255,0.9); border-radius: var(--r-lg); padding: 26px 24px; display: flex; flex-direction: column; gap: 6px; position: relative; }
+.plan.best { background: #fff; border: 2px solid var(--accent); box-shadow: 0 24px 60px rgba(79,70,229,0.18); }
+.plan .badge { position: absolute; top: -13px; left: 24px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; padding: 4px 10px; border-radius: 999px; }
+.plan .name { font-weight: 600; font-size: 17px; }
+.plan .price { font-size: 44px; font-weight: 650; letter-spacing: -0.03em; line-height: 1.1; margin-top: 8px; }
+.plan .price small { font-size: 16px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+.plan .perday { font-family: var(--font-mono); font-size: 14px; color: var(--mint); font-weight: 500; }
+.plan .save { font-size: 14px; color: var(--ink-2); min-height: 22px; }
+.plan .btn { margin-top: 16px; }
+.included { max-width: 1000px; margin: 22px auto 0; display: flex; flex-wrap: wrap; gap: 8px 22px; justify-content: center; font-size: 15px; color: var(--ink-2); }
+.included span::before { content: "\2713"; color: var(--mint); font-weight: 700; margin-right: 6px; }
+@media (max-width: 860px) { .plans { grid-template-columns: 1fr; max-width: 440px; } }
+
+/* ---------- trial + demo ---------- */
+.start { padding-block: clamp(64px, 8vw, 110px) 0; }
+.start .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.panel { border-radius: var(--r-lg); padding: clamp(22px, 3vw, 34px); display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel.trial { background: linear-gradient(150deg, #312e81, #4f46e5 60%, #6d5bd8); color: #fff; }
+.panel.trial .lede { color: rgba(255,255,255,0.85); }
+.panel.trial .steps { list-style: none; counter-reset: s; padding: 0; margin: 4px 0 6px; display: grid; gap: 10px; }
+.panel.trial .steps li { counter-increment: s; display: flex; gap: 12px; align-items: baseline; font-size: 15.5px; }
+.panel.trial .steps li::before { content: counter(s); font-family: var(--font-mono); font-size: 13px; width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,0.18); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.panel.trial .btn { background: #fff; color: var(--ink); align-self: flex-start; }
+.panel.trial .fine { font-size: 13.5px; color: rgba(255,255,255,0.75); }
+.panel.demo { background: var(--glass-strong); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 20px 50px rgba(30,27,75,0.08); }
+form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+form .full { grid-column: 1 / -1; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+input, select { font: 500 15.5px var(--font-body); color: var(--ink); padding: 11px 12px; border-radius: 10px; border: 1px solid rgba(30,27,75,0.16); background: #fff; width: 100%; }
+input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,0.15); }
+.form-note { font-size: 14px; color: var(--ink-2); }
+.form-msg { font-size: 14.5px; border-radius: 10px; padding: 10px 12px; }
+.form-msg.ok { background: var(--mint-soft); color: #065f46; }
+.form-msg.err { background: #fde8ec; color: #9f1239; }
+@media (max-width: 900px) { .start .wrap { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { form { grid-template-columns: 1fr; } }
+
+/* ---------- FAQ ---------- */
+.faq { padding-block: clamp(64px, 8vw, 110px) 0; }
+.faq .wrap { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr); gap: clamp(24px, 4vw, 60px); }
+details { border-bottom: 1px solid var(--line); padding: 16px 0; }
+details:first-child { border-top: 1px solid var(--line); }
+summary { cursor: pointer; font-weight: 600; font-size: 17px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; font-family: var(--font-mono); color: var(--accent); font-size: 20px; line-height: 1; }
+details[open] summary::after { content: "\2212"; }
+details p { margin-top: 10px; color: var(--ink-2); max-width: 64ch; }
+@media (max-width: 860px) { .faq .wrap { grid-template-columns: 1fr; } }
+
+/* ---------- footer ---------- */
+footer { margin-top: clamp(70px, 9vw, 120px); border-top: 1px solid var(--line); background: rgba(255,255,255,0.5); }
+footer .wrap { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr)); gap: 28px; padding-block: 40px; font-size: 15px; color: var(--ink-2); }
+footer h4 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+footer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+footer a { color: var(--ink-2); text-decoration: none; }
+footer a:hover { color: var(--ink); }
+footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 18px; font-size: 13.5px; }
+@media (max-width: 720px) { footer .wrap { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Curavo home">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect width="64" height="64" rx="18" fill="url(#lg)"/><rect x="26" y="12" width="12" height="40" rx="4.5" fill="#fff"/><rect x="12" y="26" width="40" height="12" rx="4.5" fill="#fff"/><path d="M13 43 Q25 31 32 34 Q39 37 51 24" stroke="#6ee7b7" stroke-width="5" stroke-linecap="round" fill="none"/></svg>
+      Curavo
+    </a>
+    <nav aria-label="Main">
+      <a href="#billing">Billing</a>
+      <a href="#stock">Stock &amp; expiry</a>
+      <a href="#safe">Backup</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn-primary" href="#start">Try free for 30 days</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <h1>Pharmacy billing that keeps working when the <em>internet doesn't.</em></h1>
+        <p class="lede">Curavo runs your medical store's GST billing, batch-wise stock, expiry returns and Schedule H1 register on your shop's own PC, and copies it all to the cloud once a day.</p>
+        <div class="ctas">
+          <a class="btn btn-primary" href="#start">Start 30-day free trial</a>
+          <a class="btn btn-ghost" href="#demo">Book a demo</a>
+        </div>
+        <p class="fine">Windows 10 or 11 · No card needed · From ₹14 a day after the trial</p>
+      </div>
+      <div class="shot">
+        <div class="frame"><img src="assets/img/billing.webp" width="1600" height="1000" alt="Curavo billing screen with three medicines on the bill, each showing its batch number, GST and strip price, and the bill total of ₹466.32"></div>
+        <div class="receipt" aria-label="A line from a Curavo GST invoice">
+          <div class="r-head"><span>TAX INVOICE</span><span>SM-2026-000006</span></div>
+          <div class="r-row"><b>IROLLA TAB</b><b>₹266.10</b><span>Batch IR0415 · Exp 01/28 · GST 5%</span></div>
+          <div class="r-row"><b>DOLO 650 TAB</b><b>₹32.12</b><span>Batch D2611 · Exp 08/27 · GST 5%</span></div>
+          <div class="r-row"><b>PANTOCID DSR CAP</b><b>₹168.10</b><span>Batch PT9902 · Exp 03/27 · GST 5%</span></div>
+          <div class="r-total"><span>CGST 2.5% + SGST 2.5%</span><span>₹466.32</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROOF STRIP -->
+  <section class="strip" aria-label="What Curavo is built for">
+    <div class="wrap">
+      <ul>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5.5 12.5a10 10 0 0 1 13 0"/><path d="M9 16.2a5 5 0 0 1 6 0"/><path d="M3 3l18 18"/></svg><div><b>Bills without internet</b><span>Everything runs on the shop PC. A power-cut on the line never stops the counter.</span></div></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 3h10l2 3v15H5V6z"/><path d="M9 11h6M9 15h4"/></svg><div><b>Proper GST invoices</b><span>HSN, batch, expiry, CGST/SGST summary, gapless numbers with your own prefix.</span></div></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><div><b>Schedule H1 register</b><span>Filled in from your bills as you sell. Ready when the inspector asks.</span></div></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5"/><rect x="9" y="13" width="6" height="6" rx="1"/><path d="M10.5 13v-1.5a1.5 1.5 0 0 1 3 0V13"/></svg><div><b>Locked cloud backup</b><span>One backup a day, encrypted on your PC before it leaves. 30 days kept.</span></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- BILLING -->
+  <section class="row" id="billing">
+    <div class="wrap">
+      <div class="copy">
+        <p class="eyebrow">At the counter</p>
+        <h2>A bill in the time it takes to find the strip.</h2>
+        <p class="lede">Type three letters or scan the barcode. Curavo shows every batch on the shelf with its own expiry and price, earliest expiry first, so you sell the box in your hand at the price printed on it.</p>
+        <ul class="ticks">
+          <li>Sell by the strip or by the tablet. Stock is counted in tablets, so loose sales never go wrong.</li>
+          <li>Batches expiring within 30 days are kept off the bill automatically.</li>
+          <li>Keyboard first: <span class="mono">F2</span> search, <span class="mono">Enter</span> add, <span class="mono">F10</span> complete.</li>
+          <li>Cash, UPI or credit (udhaar), with the patient's last visits on screen.</li>
+          <li>Thermal receipt or A4 tax invoice, with your logo and signature.</li>
+        </ul>
+      </div>
+      <div class="frame"><img src="assets/img/dashboard.webp" width="1600" height="1000" loading="lazy" alt="Curavo dashboard: today's sales, stock value, patients today, a Needs attention list with a supplier payment due and a medicine expiring, and the five most recent bills"></div>
+    </div>
+  </section>
+
+  <!-- INVOICE -->
+  <section class="row flip" id="invoice">
+    <div class="wrap">
+      <div class="copy">
+        <p class="eyebrow">The tax invoice</p>
+        <h2>An invoice your accountant won't send back.</h2>
+        <p class="lede">Every line carries what a pharmacy invoice needs. The GST summary splits tax by rate, ready for your returns.</p>
+        <ul class="ticks">
+          <li>HSN code, batch number and expiry on every medicine.</li>
+          <li>Prices are MRP with GST inside it, extracted correctly line by line.</li>
+          <li>Invoice numbers run without gaps, with your shop's own prefix (<span class="mono">SM-2026-000001</span>).</li>
+          <li>Your GSTIN and drug licence numbers printed at the top.</li>
+          <li>Prints cleanly on a black-and-white printer.</li>
+        </ul>
+      </div>
+      <div class="frame"><img src="assets/img/invoice.webp" width="1240" height="876" loading="lazy" alt="The top of a Curavo A4 tax invoice for Sunrise Medicos, showing GSTIN, drug licence number, three medicines with batch, expiry, HSN, taxable value and GST, a GST summary by rate and the total of ₹466.32"></div>
+    </div>
+  </section>
+
+  <!-- STOCK -->
+  <section class="row" id="stock">
+    <div class="wrap">
+      <div class="copy">
+        <p class="eyebrow">Stock and expiry</p>
+        <h2>Know what each box really cost you.</h2>
+        <p class="lede">Distributor invoices are entered the way they are printed: rate, trade discount, then GST. Schemes are counted in strips, so a "5+1" lowers the cost of every strip in the delivery.</p>
+        <div class="example">
+          <b>Example:</b> 10 strips of DOLO 650 at <span class="mono">₹24.86</span>, 5% discount, scheme <span class="mono">5+1</span>. You receive 12 strips, so each one really cost <span class="mono">₹19.68</span>. Curavo shows that figure, and your true margin of <span class="mono">35.7%</span>.
+        </div>
+        <ul class="ticks">
+          <li>Expiry alerts at 30 and 60 days, with the GST you would lose on a return.</li>
+          <li>Return to supplier in one step; the credit comes off what you owe them.</li>
+          <li>Supplier dues with reminders before the due date.</li>
+        </ul>
+      </div>
+      <div class="frame"><img src="assets/img/expiry.webp" width="1400" height="195" loading="lazy" alt="Curavo expiry alerts: one batch of PANTOCID DSR CAP expiring in 28 days, 40 units, with the GST loss if returned shown as ₹22.40 and a Return button"></div>
+    </div>
+  </section>
+
+  <!-- MORE -->
+  <section class="more" id="safe">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Everything else, included</p>
+        <h2>Built for an Indian medical store, not adapted to one.</h2>
+      </div>
+      <div class="grid3">
+        <div class="tile"><span class="tag">Safety</span><h3>Backed up before anything changes</h3><p>A backup is taken every time Curavo opens, and one locked copy a day goes to the cloud. If the PC dies, your data comes back.</p></div>
+        <div class="tile"><span class="tag">Safety</span><h3>Updates that wait for you</h3><p>New versions download quietly and install when you close Curavo at night. Never in the middle of a bill.</p></div>
+        <div class="tile"><span class="tag">Patients</span><h3>Follow-ups in English and Assamese</h3><p>Day 2, 5, 10 and 30 check-ins and refill reminders, in your shop's own name.</p></div>
+        <div class="tile"><span class="tag">Money</span><h3>Credit, both ways</h3><p>What patients owe you and what you owe distributors, each with its own ledger and reminders.</p></div>
+        <div class="tile"><span class="tag">Owner</span><h3>Reports you can trust</h3><p>Sales, stock value, profit and patients. Returns are netted off, so profit is real. Export to PDF or Excel.</p></div>
+        <div class="tile"><span class="tag">Staff</span><h3>Logins for each person</h3><p>Owner, pharmacist and counter roles. Prices and settings stay with the owner.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="pricing" id="pricing">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Pricing</p>
+        <h2>One plan. Every feature. GST included.</h2>
+        <p class="lede">Start with 30 days free. Then choose how often you want to pay.</p>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <span class="name">Monthly</span>
+          <span class="price">₹589<small> / month</small></span>
+          <span class="perday">about ₹20 a day</span>
+          <span class="save">Pay as you go</span>
+          <a class="btn btn-ghost" href="#start">Start free trial</a>
+        </div>
+        <div class="plan">
+          <span class="name">Half-yearly</span>
+          <span class="price">₹2,899<small> / 6 months</small></span>
+          <span class="perday">about ₹16 a day</span>
+          <span class="save">Save ₹635 compared with monthly</span>
+          <a class="btn btn-ghost" href="#start">Start free trial</a>
+        </div>
+        <div class="plan best">
+          <span class="badge">Best value</span>
+          <span class="name">Yearly</span>
+          <span class="price">₹4,999<small> / year</small></span>
+          <span class="perday">about ₹14 a day</span>
+          <span class="save">Save ₹2,069 · about 3½ months free</span>
+          <a class="btn btn-primary" href="#start">Start free trial</a>
+        </div>
+      </div>
+      <div class="included">
+        <span>All features</span><span>Daily cloud backup</span><span>Automatic updates</span><span>Support on WhatsApp</span><span>Prices include 18% GST</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- START -->
+  <section class="start" id="start">
+    <div class="wrap">
+      <div class="panel trial">
+        <h2 style="font-size: clamp(26px, 3vw, 34px)">Try Curavo free for 30 days</h2>
+        <p class="lede">Every feature, on your own shop's PC. Nothing to pay until you decide.</p>
+        <ol class="steps">
+          <li>Download and install on a Windows 10 or 11 PC.</li>
+          <li>Enter your shop's name, GSTIN and drug licence in Settings.</li>
+          <li>Add your medicines and start billing.</li>
+        </ol>
+        <a class="btn" id="download" href="#">Download for Windows</a>
+        <p class="fine">After 30 days, billing keeps working while you decide. Reports pause until you subscribe.</p>
+      </div>
+      <div class="panel demo" id="demo">
+        <h2 style="font-size: clamp(26px, 3vw, 34px)">Or let us show you</h2>
+        <p class="form-note">We will call you, show Curavo with your own medicines, and help you set it up.</p>
+        <form id="demo-form" novalidate>
+          <label for="f-name">Your name<input id="f-name" name="name" autocomplete="name" required></label>
+          <label for="f-phone">Mobile (WhatsApp)<input id="f-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label>
+          <label class="full" for="f-shop">Shop name<input id="f-shop" name="shop" required></label>
+          <label for="f-town">Town<input id="f-town" name="town" placeholder="e.g. Guwahati"></label>
+          <label for="f-current">Software you use now
+            <select id="f-current" name="current">
+              <option value="">Choose one</option>
+              <option>Marg</option><option>GoFrugal</option><option>Other software</option><option>Paper / register</option>
+            </select>
+          </label>
+          <button class="btn btn-primary full" type="submit" id="f-submit">Book my demo</button>
+          <div class="form-msg full" id="f-msg" role="status" hidden></div>
+        </form>
+        <p class="form-note">Prefer WhatsApp? Message <span class="ph" data-contact="whatsapp">[WhatsApp number]</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq" id="faq">
+    <div class="wrap">
+      <div><p class="eyebrow">Questions</p><h2 style="margin-top:10px">What shop owners ask us</h2></div>
+      <div>
+        <details><summary>Does Curavo need internet to bill?</summary><p>No. Billing, stock, patients and reports all run on your shop's PC. The internet is only used for the daily cloud backup, updates and renewing your subscription, and Curavo simply tries again later if the line is down.</p></details>
+        <details><summary>Where is my data kept? Who can see it?</summary><p>On your shop's PC. Once a day a backup is locked (encrypted) on your PC and sent to our server in India. The server cannot open it. You can, and ARZ Solutions can, so we can restore your shop if the PC is lost or damaged. Details are in our <a href="privacy.html">privacy policy</a>.</p></details>
+        <details><summary>What happens when the trial or subscription ends?</summary><p>Billing never stops, so patients are always served. After the 30-day trial, or 15 days after a paid plan ends, reports, exports and backup downloads pause until you renew. Your data stays on your PC either way.</p></details>
+        <details><summary>We use Marg now. Can we switch?</summary><p>Yes. We will help you set up your medicine list and opening stock, and you can run both side by side during the free trial.</p></details>
+        <details><summary>What computer do I need?</summary><p>A Windows 10 or 11 PC. A thermal receipt printer and a barcode scanner are optional; Curavo also prints on any A4 printer.</p></details>
+        <details><summary>Can I use it on more than one PC, or from my phone?</summary><p>Curavo runs on one PC per shop today. An owner app for Android, to see sales and stock from your phone, is being built.</p></details>
+        <details><summary>How do I pay?</summary><p>By UPI. After payment you receive a licence key for your shop; paste it into Curavo once and you are done. Prices include 18% GST.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a class="brand" href="#top" style="margin-bottom:10px">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect width="64" height="64" rx="18" fill="url(#lg2)"/><rect x="26" y="12" width="12" height="40" rx="4.5" fill="#fff"/><rect x="12" y="26" width="40" height="12" rx="4.5" fill="#fff"/><path d="M13 43 Q25 31 32 34 Q39 37 51 24" stroke="#6ee7b7" stroke-width="5" stroke-linecap="round" fill="none"/></svg>
+        Curavo
+      </a>
+      <p>Pharmacy software made in Assam by ARZ Solutions.</p>
+    </div>
+    <div>
+      <h4>Contact</h4>
+      <ul>
+        <li>WhatsApp: <span class="ph" data-contact="whatsapp">[WhatsApp number]</span></li>
+        <li>Email: <span class="ph" data-contact="email">[email]</span></li>
+        <li><span class="ph" data-contact="address">[ARZ registered address]</span></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Legal</h4>
+      <ul>
+        <li><a href="privacy.html">Privacy policy</a></li>
+        <li><a href="terms.html">Terms of service</a></li>
+        <li><a href="refund.html">Refunds and cancellations</a></li>
+      </ul>
+    </div>
+    <p class="legal">© 2026 <span class="ph" data-contact="legal_name">[ARZ Solutions registered name]</span>. Curavo is a product of ARZ Solutions. Screens shown use a demonstration shop and made-up patients.</p>
+  </div>
+</footer>
+
+<script>
+/* Site settings.  Fill these in before going live; until then the page shows
+   a highlighted placeholder wherever one is missing. */
+const SITE = {
+  whatsapp: '',                 // e.g. '+91 98640 00000'
+  email: '',                    // e.g. 'hello@curavo.in'
+  address: '',                  // ARZ Solutions' registered address
+  legal_name: '',               // as on the GST / business registration
+  download: 'https://cloud.curavo.in/download/windows',
+  leads: '',                    // e.g. 'https://cloud.curavo.in/public/leads' once the cloud is live
+};
+
+document.querySelectorAll('[data-contact]').forEach((el) => {
+  const v = SITE[el.dataset.contact];
+  if (v) { el.textContent = v; el.classList.remove('ph'); }
+});
+document.getElementById('download').href = SITE.download;
+
+const form = document.getElementById('demo-form');
+const msg = document.getElementById('f-msg');
+function show(kind, text) { msg.hidden = false; msg.className = 'form-msg full ' + kind; msg.textContent = text; }
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (!data.name.trim() || !data.shop.trim()) return show('err', 'Please fill in your name and shop name.');
+  if (data.phone.replace(/\D/g, '').length < 10) return show('err', 'Please enter a 10-digit mobile number.');
+  const wa = SITE.whatsapp ? ' or WhatsApp us at ' + SITE.whatsapp : '';
+  if (!SITE.leads) return show('err', 'Demo booking opens soon. Please message us on WhatsApp for now' + (SITE.whatsapp ? ' at ' + SITE.whatsapp : '') + '.');
+  const btn = document.getElementById('f-submit');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const res = await fetch(SITE.leads, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!res.ok) throw new Error();
+    form.reset();
+    show('ok', 'Thank you. We have your details and will call you within one working day.');
+  } catch {
+    show('err', 'That did not go through. Please try again' + wa + '.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Book my demo';
+  }
+});
+</script>
+</body>
+</html>
