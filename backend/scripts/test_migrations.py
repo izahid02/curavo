@@ -70,6 +70,70 @@ os.environ["HCC_DATA_DIR"] = str(SANDBOX)
 source_db = _real_db_path()
 target_db = SANDBOX / "pharmacy.db"
 
+# The tables whose row counts must not move.  These are the ones holding the
+# pharmacy's actual money and medicine records.
+WATCHED_TABLES = [
+    "invoices", "invoice_items", "products", "batches", "patients",
+    "users", "suppliers", "stock_purchases", "stock_movements",
+]
+
+
+def _build_stand_in_db(db_path: Path) -> None:
+    """
+    Create a stand-in "customer" database at db_path: all tables, one dummy
+    row per watched table, and no db_migrations ledger.
+
+    Rows are written with plain sqlite3, filling only the NOT NULL columns
+    with a placeholder of the right type.  The values are meaningless on
+    purpose — this test only ever COUNTS rows, so all that matters is that
+    something is there to lose.  A plain sqlite3 connection does not switch
+    on foreign-key checking, so a dummy row need not point at a real parent.
+    """
+    # Safe to import here: HCC_DATA_DIR already points at the sandbox, so
+    # init_db() creates its tables in the sandbox file, never the real one.
+    from app.database import init_db as _create_tables
+    _create_tables()
+
+    def placeholder(col_type: str):
+        t = (col_type or "").upper()
+        if "DATETIME" in t or "TIMESTAMP" in t:
+            return "2026-01-01 00:00:00"
+        if "DATE" in t:
+            return "2026-01-01"
+        if "BOOL" in t:
+            return 0
+        if any(k in t for k in ("INT", "NUMERIC", "DECIMAL", "REAL", "FLOAT")):
+            return 1
+        return "standin"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        for table in WATCHED_TABLES:
+            cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            # PRAGMA table_info row: (cid, name, type, notnull, default, pk)
+            # Skip the integer primary key (SQLite numbers it) and anything
+            # with a default; fill every other NOT NULL column.
+            needed = [(c[1], c[2]) for c in cols
+                      if c[3] and c[4] is None and not c[5]]
+            names = ", ".join(n for n, _ in needed)
+            marks = ", ".join("?" for _ in needed)
+            values = [placeholder(t) for _, t in needed]
+            try:
+                if needed:
+                    conn.execute(f"INSERT INTO {table} ({names}) VALUES ({marks})", values)
+                else:
+                    conn.execute(f"INSERT INTO {table} DEFAULT VALUES")
+            except sqlite3.Error as exc:
+                # Not fatal: that table just starts at 0 rows and is still
+                # compared before and after.  Say so rather than hide it.
+                print(f"   NOTE  could not add a stand-in row to {table}: {exc}")
+        # Imitate a shop on an older build: the ledger did not exist yet.
+        conn.execute("DROP TABLE IF EXISTS db_migrations")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 if source_db.exists():
     # sqlite3's backup API, not copy2 — the live DB is in WAL mode, so a plain
     # file copy can miss everything committed since the last checkpoint and we
@@ -93,7 +157,18 @@ if source_db.exists():
     conn.close()
     print("Dropped db_migrations from the copy → simulates a pre-update customer DB")
 else:
-    print("No live database found — testing against a fresh one instead.")
+    # No pharmacy database on this machine (a fresh checkout, a CI runner, a
+    # copy of the code with no patient data).  Testing against an EMPTY file
+    # proves nothing: there are no tables before the first startup and no rows
+    # after it, so "did the data survive?" has nothing to look at — and the
+    # check used to FAIL on that, comparing "table missing" with "0 rows".
+    #
+    # So build a small stand-in for a customer's database instead: every
+    # table, ONE row in each table we watch, and NO ledger — the same shape as
+    # a shop that has been trading on an older build.  The four startups below
+    # then test exactly what they test against a real copy.
+    print("No live database found - building a stand-in customer database.")
+    _build_stand_in_db(target_db)
 
 print(f"Sandbox: {SANDBOX}\n")
 
@@ -106,13 +181,6 @@ from sqlalchemy import text                              # noqa: E402
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
-
-# The tables whose row counts must not move.  These are the ones holding the
-# pharmacy's actual money and medicine records.
-WATCHED_TABLES = [
-    "invoices", "invoice_items", "products", "batches", "patients",
-    "users", "suppliers", "stock_purchases", "stock_movements",
-]
 
 FAILURES = []
 

@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
+import { usePharmacy } from '../lib/pharmacy';
 import { getTodayIST } from '../lib/datetime';
 
 // ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ function ModalShell({ title, onClose, children, width = 480 }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1e1b4b', margin: 0 }}>{title}</h2>
           <button onClick={onClose} style={{
-            background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#9ca3af', lineHeight: 1,
+            background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: 'var(--text-hint)', lineHeight: 1,
           }}>×</button>
         </div>
         {children}
@@ -169,7 +170,7 @@ export default function Expenditure() {
       {/* Heading */}
       <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b', marginBottom: 2 }}>Expenditure &amp; Payroll</h1>
-        <p style={{ fontSize: 14, color: '#9ca3af' }}>Track spending, staff salaries, advances and the daily cash drawer</p>
+        <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>Track spending, staff salaries, advances and the daily cash drawer</p>
       </div>
 
       {/* Tab bar */}
@@ -300,7 +301,7 @@ function ExpensesTab() {
         <div style={{
           display: 'grid', gridTemplateColumns: '90px 110px 1.6fr 1fr 100px 70px 1fr 70px',
           padding: '12px 18px', borderBottom: '1px solid rgba(0,0,0,0.06)',
-          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af',
+          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-hint)',
         }}>
           <span>Date</span><span>Category</span><span>Description</span><span>Paid To</span>
           <span style={{ textAlign: 'right' }}>Amount</span><span>Mode</span><span>Added By</span>
@@ -314,7 +315,7 @@ function ExpensesTab() {
             </div>
           ))
         ) : rows.length === 0 ? (
-          <div style={{ padding: '32px 18px', textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
+          <div style={{ padding: '32px 18px', textAlign: 'center', color: 'var(--text-hint)', fontSize: 14 }}>
             No expenses match this view.
           </div>
         ) : rows.map((e) => (
@@ -363,7 +364,7 @@ function ExpenseRow({ expense: e, onDeleted }) {
       </span>
       <span style={{ fontSize: 13, fontWeight: 700, color: '#1e1b4b', textAlign: 'right' }}>{formatINR(e.amount)}</span>
       <span style={{ fontSize: 11, fontWeight: 600, color: e.payment_mode === 'CASH' ? '#059669' : '#0284c7' }}>{e.payment_mode}</span>
-      <span style={{ fontSize: 12, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {e.added_by_name || <span style={{ color: '#d1d5db' }}>—</span>}
       </span>
       <span style={{ textAlign: 'right' }}>
@@ -496,7 +497,7 @@ function EmployeesTab() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <p style={{ fontSize: 14, color: '#9ca3af' }}>{loading ? 'Loading…' : `${employees.length} active employee${employees.length !== 1 ? 's' : ''}`}</p>
+        <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>{loading ? 'Loading…' : `${employees.length} active employee${employees.length !== 1 ? 's' : ''}`}</p>
         <button className="btn-primary" onClick={() => setModal('add')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -511,7 +512,7 @@ function EmployeesTab() {
         <div style={{
           display: 'grid', gridTemplateColumns: '1.6fr 1.2fr 90px 90px 90px 90px 100px 100px 130px',
           padding: '12px 18px', borderBottom: '1px solid rgba(0,0,0,0.06)',
-          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af',
+          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-hint)',
         }}>
           <span>Name</span><span>Role</span>
           <span style={{ textAlign: 'right' }}>Basic</span><span style={{ textAlign: 'right' }}>HRA</span>
@@ -527,7 +528,7 @@ function EmployeesTab() {
             </div>
           ))
         ) : employees.length === 0 ? (
-          <div style={{ padding: '32px 18px', textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>No employees yet. Add your first one above.</div>
+          <div style={{ padding: '32px 18px', textAlign: 'center', color: 'var(--text-hint)', fontSize: 14 }}>No employees yet. Add your first one above.</div>
         ) : employees.map((emp) => (
           <div key={emp.id} style={{
             display: 'grid', gridTemplateColumns: '1.6fr 1.2fr 90px 90px 90px 90px 100px 100px 130px',
@@ -540,7 +541,7 @@ function EmployeesTab() {
             <span style={{ fontSize: 13, color: '#6b7280', textAlign: 'right' }}>{formatINR(emp.travel_allowance)}</span>
             <span style={{ fontSize: 13, color: '#6b7280', textAlign: 'right' }}>{formatINR(emp.other_allowance)}</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#4f46e5', textAlign: 'right' }}>{formatINR(emp.total_salary)}</span>
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>{emp.joining_date || '—'}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>{emp.joining_date || '—'}</span>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
               <button onClick={() => setModal({ edit: emp })} style={{
                 background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#6366f1',
@@ -618,7 +619,7 @@ function EmployeeModal({ employee, onClose, onSaved }) {
         </div>
         <Field label="Joining Date"><input type="date" value={form.joining_date} onChange={(e) => set('joining_date')(e.target.value)} /></Field>
 
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 4 }}>Salary Details</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 4 }}>Salary Details</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Basic Salary" value={form.basic_salary} onChange={set('basic_salary')} placeholder="0" type="number" required />
           <Field label="HRA (₹)" value={form.hra} onChange={set('hra')} placeholder="0" type="number" />
@@ -681,9 +682,9 @@ function PayrollTab() {
       {error && <div style={{ ...errBanner, marginBottom: 16 }}>{error}</div>}
 
       {loading ? (
-        <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: '#9ca3af' }}>Loading payroll…</div>
+        <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: 'var(--text-hint)' }}>Loading payroll…</div>
       ) : rows.length === 0 ? (
-        <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: '#9ca3af' }}>No active employees. Add employees first.</div>
+        <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: 'var(--text-hint)' }}>No active employees. Add employees first.</div>
       ) : (
         <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
           {rows.map((r) => (
@@ -747,7 +748,7 @@ function PayrollCard({ row, onSettle, onSlip }) {
           Advances taken this month: <strong style={{ color: '#b45309' }}>{formatINR(row.advances_taken)}</strong>
         </div>
         {row.advances.map((a, idx) => (
-          <div key={idx} style={{ fontSize: 11, color: '#9ca3af', paddingLeft: 12 }}>
+          <div key={idx} style={{ fontSize: 11, color: 'var(--text-hint)', paddingLeft: 12 }}>
             {idx === row.advances.length - 1 ? '└──' : '├──'} {a.date?.slice(5)}: {formatINR(a.amount)} ({a.description})
           </div>
         ))}
@@ -820,7 +821,7 @@ function SettleSalaryModal({ row, month, year, onClose, onSaved }) {
           {summaryRow('Net Payable', formatINR(row.net_payable), true)}
         </div>
         <Field label="Amount to Pay (₹)" value={amount} onChange={setAmount} type="number" required />
-        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: -8 }}>Editable — owner can adjust (partial payment allowed).</div>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: -8 }}>Editable — owner can adjust (partial payment allowed).</div>
         <Field label="Payment Mode" required><ModeToggle value={mode} onChange={setMode} /></Field>
         <Field label="Notes" value={notes} onChange={setNotes} placeholder="Optional" />
         {error && <div style={errBanner}>{error}</div>}
@@ -836,6 +837,7 @@ function SettleSalaryModal({ row, month, year, onClose, onSaved }) {
 /** Printable salary slip. Uses window.print() scoped to the slip content. */
 function SalarySlipModal({ row, month, year, onClose }) {
   const e = row.employee;
+  const { pharmacy } = usePharmacy();
 
   function handlePrint() {
     const content = document.getElementById('salary-slip-print').innerHTML;
@@ -859,7 +861,7 @@ function SalarySlipModal({ row, month, year, onClose }) {
   return (
     <ModalShell title="Salary Slip" onClose={onClose} width={460}>
       <div id="salary-slip-print">
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#1e1b4b', margin: '0 0 2px' }}>Health Care Centre</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#1e1b4b', margin: '0 0 2px' }}>{pharmacy.pharmacy_name}</h1>
         <div className="muted" style={{ color: '#6b7280', fontSize: 13, marginBottom: 16 }}>
           Salary Slip — {MONTH_NAMES[month - 1]} {year}
         </div>
@@ -893,7 +895,7 @@ function SalarySlipModal({ row, month, year, onClose }) {
             </tr>
           </tbody>
         </table>
-        <div className="muted" style={{ color: '#9ca3af', fontSize: 11, marginTop: 20 }}>
+        <div className="muted" style={{ color: 'var(--text-hint)', fontSize: 11, marginTop: 20 }}>
           This is a computer-generated salary slip. Powered by ARZ Technologies.
         </div>
       </div>
@@ -990,7 +992,7 @@ function CashRegisterTab() {
       {error && <div style={{ ...errBanner, marginBottom: 16 }}>{error}</div>}
 
       {loading || !reg ? (
-        <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>
+        <div style={{ ...glassCard, padding: 40, textAlign: 'center', color: 'var(--text-hint)' }}>Loading…</div>
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginBottom: 20 }}>
@@ -1019,7 +1021,7 @@ function CashRegisterTab() {
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b', marginBottom: 12 }}>Last 7 Days</div>
             <div style={{
               display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1fr 1fr',
-              fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#9ca3af',
+              fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-hint)',
               paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)',
             }}>
               <span>Date</span>
@@ -1147,7 +1149,7 @@ function StatCard({ label, value, sub, color }) {
   return (
     <div style={{ ...glassCard, padding: '16px 18px', position: 'relative', overflow: 'hidden' }} className="fade-up">
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color, borderRadius: '14px 14px 0 0' }} />
-      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9ca3af', marginBottom: 8, marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-hint)', marginBottom: 8, marginTop: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b' }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color, marginTop: 4 }}>{sub}</div>}
     </div>

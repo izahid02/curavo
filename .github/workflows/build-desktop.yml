@@ -1,4 +1,4 @@
-name: Build HCC Desktop App
+name: Build Curavo Desktop App
 
 # Runs when you push a version tag (e.g. v0.1.0-beta) or trigger it by hand
 # from the Actions tab.  Produces a Windows .exe installer.
@@ -93,7 +93,7 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: HCC-ERP-Windows-${{ github.ref_name }}
+          name: Curavo-Windows-${{ github.ref_name }}
           path: |
             frontend/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
           retention-days: 30
@@ -114,9 +114,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: HCC Pharmacy ERP ${{ github.ref_name }}
+          name: Curavo ${{ github.ref_name }}
           body: |
-            ## Health Care Centre ERP ${{ github.ref_name }}
+            ## Curavo ${{ github.ref_name }}
             Download the installer below and run on Windows 10/11.
             Powered by ARZ Technologies
           files: |

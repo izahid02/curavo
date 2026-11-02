@@ -153,7 +153,7 @@ export default function ReturnToSupplierModal({ batch, onClose, onDone }) {
           <strong>{maxQty}</strong>
         </p>
 
-        {loading && <p style={{ fontSize: 14, color: '#9ca3af' }}>Loading return details…</p>}
+        {loading && <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>Loading return details…</p>}
 
         {loadErr && (
           <div style={{
@@ -171,20 +171,20 @@ export default function ReturnToSupplierModal({ batch, onClose, onDone }) {
               background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.18)',
               borderRadius: 12, padding: '10px 14px', marginBottom: 18,
             }}>
-              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9ca3af' }}>
+              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-hint)' }}>
                 Supplier
               </div>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1e1b4b' }}>
                 {preview.supplier_name}
               </div>
-              <div style={{ fontSize: 11.5, color: '#9ca3af', marginTop: 2 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 2 }}>
                 Auto-filled from the original stock purchase
               </div>
             </div>
 
             {/* Quantity */}
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>
-              Return Quantity * <span style={{ fontWeight: 400, color: '#9ca3af' }}>(max: {maxQty})</span>
+              Return Quantity * <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>(max: {maxQty})</span>
             </label>
             <input
               type="number" min="1" max={maxQty}
@@ -201,7 +201,7 @@ export default function ReturnToSupplierModal({ batch, onClose, onDone }) {
               background: 'rgba(255,255,255,0.66)', border: '1px solid rgba(255,255,255,0.8)',
               borderRadius: 12, padding: '14px 16px', marginBottom: 18,
             }}>
-              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: '#9ca3af', marginBottom: 10 }}>
+              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-hint)', marginBottom: 10 }}>
                 Return Value Calculation{calc.hasScheme ? ` (${preview.scheme_label} Scheme)` : ''}
               </div>
               {/* Scheme breakdown (Feature B) — paid vs bonus units being returned */}

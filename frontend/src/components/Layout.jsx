@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { clearAuth, getUser, saveToken } from '../lib/auth';
 import { api, setAuthToken } from '../lib/api';
 import { usePharmacy } from '../lib/pharmacy.jsx';
-import ARZLogo from './shared/ARZLogo';
+import Icon from './shared/Icon';
 /** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
  *  in backend/app/routers/settings.py — the backend enforces it either way. */
 const PHARMACY_SETTINGS_ROLES = ['Owner', 'Administrator'];
@@ -127,6 +127,17 @@ export default function Layout() {
   const [avatarError, setAvatarError]             = useState(null);
   const [toast, setToast]                         = useState(null);
 
+  /* Newest backup on this PC, for the status card at the foot of the sidebar.
+     null = not loaded / not allowed to see backups (the list is Owner/Admin
+     only), so the card simply does not render for other roles.
+     NOTE: this deliberately says "backup", not "synced" — cloud sync arrives
+     in Month 2, and the card must never claim something that is not true. */
+  const [lastBackup, setLastBackup]               = useState(null);
+
+  /* The header search box (dashboard only) and its Ctrl+K shortcut. */
+  const [headerSearch, setHeaderSearch]           = useState('');
+  const headerSearchRef                           = useRef(null);
+
   /*
    * A blob: object URL holds a reference to an in-memory copy of the image.
    * If we replace it (or unmount) without calling URL.revokeObjectURL, that
@@ -171,6 +182,12 @@ export default function Layout() {
   const displayName = profile?.full_name || profile?.username
     || user?.full_name || 'User';
   const firstName   = displayName.split(' ')[0];
+
+  /* Header bits for the dashboard greeting (Curavo design). */
+  const isDashboard  = location.pathname === '/';
+  const todayShort   = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+  const hourNow      = new Date().getHours();
+  const greetingWord = hourNow < 12 ? 'Good morning' : hourNow < 17 ? 'Good afternoon' : 'Good evening';
 
   /* Dashboard greets the user; every other page has a fixed subtitle. */
   const pageSubtitle = location.pathname === '/'
@@ -309,6 +326,55 @@ export default function Layout() {
     return () => clearInterval(timer);
   }, []);
 
+  /* Backup status: read the newest snapshot's time once, then every 10 min. */
+  useEffect(() => {
+    function fetchLastBackup() {
+      api.get('/backup/list')
+        .then(({ data }) => {
+          const newest = data.backups?.[0];
+          setLastBackup(newest ? { at: newest.created_at } : { at: null });
+        })
+        .catch(() => setLastBackup(null));   // 403 for non-admins: hide the card
+    }
+    fetchLastBackup();
+    const timer = setInterval(fetchLastBackup, 600_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  /* Dashboard keyboard shortcuts: F2 = new bill, Ctrl/Cmd+K = search.
+     Only on the dashboard — Billing has its own F2 (focus search) and must
+     keep it. */
+  useEffect(() => {
+    if (location.pathname !== '/') return;
+    const onKey = (e) => {
+      if (e.key === 'F2') { e.preventDefault(); navigate('/billing'); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        headerSearchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [location.pathname, navigate]);
+
+  /* Enter in the header search opens Medicines already filtered (?q=). */
+  function submitHeaderSearch(e) {
+    e.preventDefault();
+    const q = headerSearch.trim();
+    navigate(q ? `/inventory?q=${encodeURIComponent(q)}` : '/inventory');
+  }
+
+  /* "today 9:14 AM" / "yesterday 6:02 PM" / "28 Oct, 9:14 AM" */
+  function backupWhen(iso) {
+    const d = new Date(iso);
+    const time = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+    const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((day0 - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86_400_000);
+    if (diffDays === 0) return `today ${time}`;
+    if (diffDays === 1) return `yesterday ${time}`;
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + `, ${time}`;
+  }
+
   function handleSignOut() {
     clearAuth();
     setAuthToken(null);
@@ -319,7 +385,10 @@ export default function Layout() {
   const navClass = ({ isActive }) => `nav-item${isActive ? ' nav-item-active' : ''}`;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', position: 'relative', zIndex: 1 }}>
+    <div style={{
+      display: 'flex', height: '100vh', position: 'relative', zIndex: 1,
+      padding: 20, gap: 20, boxSizing: 'border-box',
+    }}>
 
       {/* ══ SIDEBAR ══════════════════════════════════════════════════
           Exactly one viewport tall, split into three flex rows: the brand
@@ -333,13 +402,17 @@ export default function Layout() {
           taking it out would need a matching 220px margin on that column, one
           more thing to keep in sync for no visible gain. */}
       <aside style={{
-        width: 220,
+        width: 236,
         position: 'relative', zIndex: 10,
-        background: 'rgba(255,255,255,0.52)',
-        backdropFilter: 'blur(28px)',
-        WebkitBackdropFilter: 'blur(28px)',
-        borderRight: '1px solid rgba(255,255,255,0.75)',
-        height: '100vh',
+        background: 'rgba(255,255,255,0.50)',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+        border: '1px solid rgba(255,255,255,0.85)',
+        borderRadius: 22,
+        boxShadow: '0 10px 36px rgba(79,70,229,0.08)',
+        height: '100%',
+        boxSizing: 'border-box',
+        padding: '6px 4px',
         display: 'flex', flexDirection: 'column',
         flexShrink: 0,
       }}>
@@ -348,9 +421,7 @@ export default function Layout() {
             never the thing that gives way when the screen is short. */}
         <div style={{
           flexShrink: 0,
-          padding: '20px 16px 16px',
-          borderBottom: '1px solid rgba(99, 102, 241, 0.1)',
-          marginBottom: '8px',
+          padding: '16px 14px 12px',
         }}>
           <div style={{
             display: 'flex',
@@ -358,14 +429,17 @@ export default function Layout() {
             gap: '10px',
             padding: '4px 0',
           }}>
+            {/* The PRODUCT's mark.  The shop's own logo (HCC_LOGO.png) is
+                still what prints on receipts and invoices — that is the
+                shop's identity, not ours. */}
             <img
-              src="/HCC_LOGO.png"
-              alt="HCC Logo"
+              src="/curavo-logo.svg"
+              alt="Curavo"
               style={{
-                width: '40px',
-                height: '40px',
-                objectFit: 'contain',
-                borderRadius: '8px',
+                width: '38px',
+                height: '38px',
+                borderRadius: '11px',
+                boxShadow: '0 4px 12px rgba(99,102,241,0.30)',
                 flexShrink: 0,
               }}
             />
@@ -379,9 +453,18 @@ export default function Layout() {
               minWidth: 0,
             }}>
               <div style={{
-                fontWeight: 700,
-                fontSize: '14px',
+                fontWeight: 600,
+                fontSize: '18px',
+                letterSpacing: '-0.02em',
                 color: 'var(--text)',
+                lineHeight: 1.1,
+              }}>
+                Curavo
+              </div>
+              <div style={{
+                fontWeight: 500,
+                fontSize: '12px',
+                color: 'var(--text-secondary)',
                 lineHeight: 1.2,
                 // The name is now the OWNER'S text, not a fixed string, so it
                 // has to be able to be long. Ellipsis rather than nowrap-
@@ -427,8 +510,6 @@ export default function Layout() {
           gap: 'clamp(0px, 0.25vh, 3px)',
         }}>
 
-          <NavSection label="Main" />
-
           <NavLink to="/" end className={navClass}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <rect x="3" y="3" width="7" height="7" rx="1.5"/>
@@ -443,23 +524,21 @@ export default function Layout() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <path d="M9 7H6a2 2 0 00-2 2v9a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1-4H9m0 0a1 1 0 000 2h6a1 1 0 000-2"/>
             </svg>
-            Billing &amp; POS
+            Billing
           </NavLink>
 
           <NavLink to="/invoices" className={navClass}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
             </svg>
-            Invoice History
+            Invoices
           </NavLink>
-
-          <NavSection label="Inventory" />
 
           <NavLink to="/inventory" className={navClass}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
             </svg>
-            Medicines
+            Inventory
           </NavLink>
 
           {/* "Purchasing" nav removed — stock-in now lives inside the unified
@@ -471,20 +550,13 @@ export default function Layout() {
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
             </svg>
-            Expiry Alerts
+            Expiry alerts
             {alertCount > 0 && (
-              <span style={{
-                background: '#ef4444', color: '#fff',
-                fontSize: 9, fontWeight: 700,
-                borderRadius: 20, padding: '1px 7px',
-                marginLeft: 'auto',
-              }}>
+              <span className="nav-badge">
                 {alertCount}
               </span>
             )}
           </NavLink>
-
-          <NavSection label="Patients" />
 
           <NavLink to="/patients" className={navClass}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -495,20 +567,13 @@ export default function Layout() {
             Patients
           </NavLink>
 
-          <NavSection label="Communication" />
-
           <NavLink to="/follow-ups" className={navClass}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0114 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
             </svg>
-            Follow-Ups
+            Follow-ups
             {(followUpDueCount + followUpPendingAction) > 0 && (
-              <span style={{
-                background: '#ef4444', color: '#fff',
-                fontSize: 9, fontWeight: 700,
-                borderRadius: 20, padding: '1px 7px',
-                marginLeft: 'auto',
-              }}>
+              <span className="nav-badge">
                 {followUpDueCount + followUpPendingAction}
               </span>
             )}
@@ -522,12 +587,7 @@ export default function Layout() {
             </svg>
             Credit
             {creditOverdueCount > 0 && (
-              <span style={{
-                background: '#ef4444', color: '#fff',
-                fontSize: 9, fontWeight: 700,
-                borderRadius: 20, padding: '1px 7px',
-                marginLeft: 'auto',
-              }}>
+              <span className="nav-badge">
                 {creditOverdueCount}
               </span>
             )}
@@ -539,8 +599,6 @@ export default function Layout() {
             </svg>
             Marketing
           </NavLink>
-
-          <NavSection label="Management" />
 
           <NavLink to="/suppliers" className={navClass}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -576,7 +634,7 @@ export default function Layout() {
               <line x1="8" y1="11" x2="16" y2="11"/>
               <line x1="8" y1="15" x2="13" y2="15"/>
             </svg>
-            Register
+            H1 Register
           </NavLink>
 
           <NavLink to="/backup" className={navClass}>
@@ -605,76 +663,113 @@ export default function Layout() {
             It comes up to full strength on hover, for anyone who wants to look
             at it properly.  Label and logo are both left-aligned to the same
             16px edge as the brand block at the top of the sidebar. */}
-        <div
-          style={{
-            flexShrink: 0,
-            padding: '14px 16px 24px',
-            borderTop: '1px solid rgba(99, 102, 241, 0.08)',
-            opacity: 0.75,
-            transition: 'opacity 0.2s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.75'; }}
-        >
-          <div style={{
-            fontSize: '10px',
-            fontWeight: 600,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: '#6b7280',
-            marginBottom: '6px',
-          }}>
-            Powered by
-          </div>
-          <ARZLogo size="sm" />
-        </div>
+        {/* Backup status — pinned to the foot of the sidebar in normal flow
+            (flexShrink: 0, same reasoning as the old ARZ block it replaces:
+            it must never be squeezed or overlapped by the nav).
+            Green when a backup exists, amber when there is none yet.  Click
+            opens the Backup page.  Hidden for roles that cannot see backups. */}
+        {lastBackup && (
+          <NavLink
+            to="/backup"
+            style={{
+              flexShrink: 0,
+              margin: '8px 10px 10px',
+              padding: '12px 14px',
+              borderRadius: 14,
+              background: lastBackup.at ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.14)',
+              textDecoration: 'none',
+              display: 'flex', flexDirection: 'column', gap: 2,
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: lastBackup.at ? '#047857' : '#b45309' }}>
+              ● {lastBackup.at ? 'Backup safe' : 'No backup yet'}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              {lastBackup.at ? `Last backup ${backupWhen(lastBackup.at)}` : 'Open Backup to make one'}
+            </span>
+          </NavLink>
+        )}
       </aside>
 
       {/* ══ MAIN AREA ════════════════════════════════════════════════ */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
 
         {/* Topbar */}
+        {/* Header — no bar of its own (Curavo design): it sits on the
+            gradient, level with the top of the floating sidebar.
+            Dashboard: date + greeting, with search and New bill.
+            Every other page: title + subtitle, with the date. */}
         <header style={{
-          height: 68,
-          background: 'rgba(255,255,255,0.50)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          borderBottom: '1px solid rgba(255,255,255,0.75)',
-          display: 'flex', alignItems: 'center',
-          padding: '0 22px', gap: 14,
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+          padding: '6px 4px 18px', gap: 12,
           flexShrink: 0,
         }}>
-          {/* Page title + subtitle with an indigo accent bar on the left */}
-          <div style={{
-            flex: 1,
-            borderLeft: '3px solid #6366f1',
-            paddingLeft: '12px',
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <h1 style={{
-                fontSize: '22px',
-                fontWeight: 700,
-                color: '#1e1b4b',
-                margin: 0,
-                lineHeight: 1.2,
-                letterSpacing: '-0.02em',
-              }}>
-                {pageTitle}
-              </h1>
-              <p style={{
-                fontSize: '12px',
-                color: '#94a3b8',
-                margin: 0,
-                fontWeight: 400,
-              }}>
-                {pageSubtitle}
-              </p>
-            </div>
+          <div style={{ flex: 1, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {isDashboard ? (
+              <>
+                <span style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 500 }}>
+                  {todayShort}
+                </span>
+                <h1 style={{ fontSize: 'clamp(22px, 2.1vw, 30px)', fontWeight: 600, color: '#1e1b4b', margin: 0, lineHeight: 1.15, letterSpacing: '-0.02em' }}>
+                  {greetingWord}, {firstName}
+                </h1>
+              </>
+            ) : (
+              <>
+                <h1 style={{ fontSize: 26, fontWeight: 600, color: '#1e1b4b', margin: 0, lineHeight: 1.2, letterSpacing: '-0.02em' }}>
+                  {pageTitle}
+                </h1>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+                  {pageSubtitle}
+                </p>
+              </>
+            )}
           </div>
 
-          <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>
-            {today}
-          </span>
+          {isDashboard ? (
+            <>
+              {/* Search medicines — Enter opens Medicines filtered; Ctrl+K focuses */}
+              <form onSubmit={submitHeaderSearch} role="search" style={{ margin: 0 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  height: 44, padding: '0 12px 0 14px', width: 'clamp(200px, 22vw, 300px)', boxSizing: 'border-box',
+                  background: 'rgba(255,255,255,0.65)',
+                  backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(255,255,255,0.9)', borderRadius: 12,
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+                  </svg>
+                  <input
+                    ref={headerSearchRef}
+                    value={headerSearch}
+                    onChange={(e) => setHeaderSearch(e.target.value)}
+                    placeholder="Search medicines"
+                    aria-label="Search medicines"
+                    style={{
+                      border: 0, outline: 0, boxShadow: 'none', padding: 0,
+                      font: 'inherit', fontSize: 14, flex: 1, minWidth: 0,
+                      background: 'transparent', color: '#1e1b4b',
+                    }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--text-hint)', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 6, padding: '0 6px', whiteSpace: 'nowrap' }}>
+                    Ctrl K
+                  </span>
+                </label>
+              </form>
+              <button
+                className="btn-primary"
+                onClick={() => navigate('/billing')}
+                style={{ height: 44, padding: '0 18px', borderRadius: 12, fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+              >
+                + New bill <span style={{ fontSize: 12, opacity: 0.85 }}>F2</span>
+              </button>
+            </>
+          ) : (
+            <span style={{ fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              {today}
+            </span>
+          )}
 
           {/* Account button — opens the dropdown menu.  Wrapped in an error
               boundary so a render fault here can never blank the whole app. */}
@@ -682,16 +777,19 @@ export default function Layout() {
           <button
             data-account-menu
             onClick={() => { setAccountMenuOpen((o) => !o); setAvatarError(null); }}
+            aria-label={`Account: ${profile?.full_name || profile?.username || 'User'}`}
+            title={`${profile?.full_name || profile?.username || 'User'} · ${profile?.role || user?.role_name || 'Staff'}`}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
-              background: 'rgba(255,255,255,0.6)',
-              border: '1px solid rgba(255,255,255,0.8)',
-              borderRadius: '50px',
-              padding: '6px 14px 6px 6px',
+              justifyContent: 'center',
+              width: 44, height: 44,
+              background: 'rgba(255,255,255,0.65)',
+              border: '1px solid rgba(255,255,255,0.9)',
+              borderRadius: '50%',
+              padding: 0,
               cursor: 'pointer',
-              backdropFilter: 'blur(8px)',
+              backdropFilter: 'blur(16px)',
               transition: 'all 0.2s',
             }}
           >
@@ -712,20 +810,6 @@ export default function Layout() {
               )}
             </div>
 
-            {/* Name + Role */}
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e1b4b', lineHeight: 1.2 }}>
-                {profile?.full_name || profile?.username || 'User'}
-              </div>
-              <div style={{ fontSize: '10px', color: '#6366f1', fontWeight: 500 }}>
-                {profile?.role || user?.role_name || 'Staff'}
-              </div>
-            </div>
-
-            {/* Chevron */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
           </button>
           </AccountMenuBoundary>
         </header>
@@ -734,7 +818,7 @@ export default function Layout() {
         <main style={{
           flex: 1, overflowY: 'auto',
           position: 'relative', zIndex: 1,
-          padding: 24,
+          padding: '0 4px 8px',
           background: 'transparent',
         }}>
           <Outlet />
@@ -748,8 +832,8 @@ export default function Layout() {
           data-account-menu
           style={{
             position: 'fixed',
-            top: '72px',
-            right: '16px',
+            top: '76px',
+            right: '24px',
             width: '280px',
             background: 'rgba(255,255,255,0.95)',
             backdropFilter: 'blur(20px)',
@@ -1072,7 +1156,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
         <label style={modalLabel}>Username</label>
         <input style={{ ...modalInput, marginBottom: 4 }} value={username}
           onChange={(e) => setUsername(e.target.value)} placeholder="e.g. admin" />
-        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 14 }}>
           {usernameChanged
             ? `⚠ You will sign in as "${username.trim()}" from now on — "${profile?.username}" will stop working.`
             : 'Letters, numbers and underscores. At least 3 characters.'}
@@ -1085,7 +1169,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
         <label style={modalLabel}>Email</label>
         <input style={{ ...modalInput, marginBottom: 4 }} type="email" value={email}
           onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 14 }}>
           You can sign in with this email as well as your username.
         </div>
 
@@ -1203,7 +1287,7 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
         <input style={{ ...modalInput, marginBottom: 4 }} value={form.pharmacy_dl_number}
           onChange={(e) => set('pharmacy_dl_number', e.target.value)}
           placeholder="Drug Licence number" />
-        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 14 }}>
           GSTIN and DL number are legally required on a pharmacy bill — they
           print on the receipt whenever they are filled in.
         </div>

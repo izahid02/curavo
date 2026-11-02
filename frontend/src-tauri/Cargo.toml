@@ -2,7 +2,7 @@
 name = "hcc-erp"
 version = "0.1.0"
 edition = "2021"
-description = "Health Care Centre ERP desktop shell"
+description = "Curavo desktop shell"
 authors = ["ARZ Technologies"]
 
 # The Tauri build script (build.rs) generates code from tauri.conf.json at

@@ -255,7 +255,7 @@ function HistoryPanel({ supplierId, onClose }) {
               {ledger?.supplier?.name ?? 'Credit history'}
             </h2>
             {ledger?.supplier?.phone && (
-              <p style={{ fontSize: 13, color: '#9ca3af' }}>{ledger.supplier.phone}</p>
+              <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>{ledger.supplier.phone}</p>
             )}
             {/* Licence / tax identifiers — handy to have on screen while
                 reconciling a paper invoice against this ledger. */}
@@ -272,14 +272,14 @@ function HistoryPanel({ supplierId, onClose }) {
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 22, lineHeight: 1 }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-hint)', fontSize: 22, lineHeight: 1 }}
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        {loading && <p style={{ fontSize: 14, color: '#9ca3af' }}>Loading…</p>}
+        {loading && <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>Loading…</p>}
         {error && (
           <div style={{
             background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)',
@@ -305,7 +305,7 @@ function HistoryPanel({ supplierId, onClose }) {
                   background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.75)',
                   borderRadius: 12, padding: '12px 16px',
                 }}>
-                  <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9ca3af' }}>
+                  <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-hint)' }}>
                     {label}
                   </div>
                   <div style={{ fontSize: 17, fontWeight: 700, color }}>{formatINR(value)}</div>
@@ -314,12 +314,12 @@ function HistoryPanel({ supplierId, onClose }) {
             </div>
 
             {/* Transactions, newest first */}
-            <h3 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, color: '#9ca3af', marginBottom: 10 }}>
+            <h3 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-hint)', marginBottom: 10 }}>
               Transactions
             </h3>
 
             {ledger.transactions.length === 0 && (
-              <p style={{ fontSize: 14, color: '#9ca3af' }}>No credit activity yet.</p>
+              <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>No credit activity yet.</p>
             )}
 
             {ledger.transactions.map((tx) => {
@@ -333,7 +333,7 @@ function HistoryPanel({ supplierId, onClose }) {
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: style.color }}>
                       {style.label}
                       {tx.payment_mode && (
-                        <span style={{ fontWeight: 500, color: '#9ca3af' }}> · {tx.payment_mode}</span>
+                        <span style={{ fontWeight: 500, color: 'var(--text-hint)' }}> · {tx.payment_mode}</span>
                       )}
                     </div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: style.color }}>
@@ -341,7 +341,7 @@ function HistoryPanel({ supplierId, onClose }) {
                     </div>
                   </div>
 
-                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 3 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 3 }}>
                     {tx.created_at ? formatDateOnly(tx.created_at) : '—'}
                     {tx.invoice_number && <> · Invoice {tx.invoice_number}</>}
                     {tx.due_date && <> · Due {formatDateOnly(tx.due_date)}</>}
@@ -363,7 +363,7 @@ function HistoryPanel({ supplierId, onClose }) {
                   )}
 
                   {tx.notes && (
-                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4, fontStyle: 'italic' }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 4, fontStyle: 'italic' }}>
                       {tx.notes}
                     </div>
                   )}
@@ -438,7 +438,7 @@ export default function SupplierCredit() {
           }}>
             {/* 3px gradient top border — the standard stat-card treatment */}
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: c.accent }} />
-            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: '#9ca3af', marginBottom: 6 }}>
+            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-hint)', marginBottom: 6 }}>
               {c.label}
             </div>
             <div style={{ fontSize: 24, fontWeight: 700, color: c.color }}>
@@ -477,7 +477,7 @@ export default function SupplierCredit() {
           display: 'grid', gridTemplateColumns: '2fr 1.2fr 1.2fr 1.4fr 1fr 190px',
           gap: 12, padding: '12px 20px',
           borderBottom: '1px solid rgba(255,255,255,0.6)',
-          fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: '#9ca3af', fontWeight: 600,
+          fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-hint)', fontWeight: 600,
         }}>
           <div>Supplier</div>
           <div style={{ textAlign: 'right' }}>Outstanding</div>
@@ -488,7 +488,7 @@ export default function SupplierCredit() {
         </div>
 
         {loading && (
-          <div style={{ padding: 24, fontSize: 14, color: '#9ca3af' }}>Loading…</div>
+          <div style={{ padding: 24, fontSize: 14, color: 'var(--text-hint)' }}>Loading…</div>
         )}
 
         {!loading && rows.length === 0 && (
@@ -496,7 +496,7 @@ export default function SupplierCredit() {
             <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>
               No supplier credit outstanding.
             </p>
-            <p style={{ fontSize: 13, color: '#9ca3af' }}>
+            <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>
               Credit is created automatically when you add stock without paying the full invoice.
             </p>
           </div>
@@ -511,20 +511,20 @@ export default function SupplierCredit() {
             <div>
               <div style={{ fontWeight: 600, color: '#1e1b4b' }}>{row.supplier_name}</div>
               {row.supplier_phone && (
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>{row.supplier_phone}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{row.supplier_phone}</div>
               )}
             </div>
-            <div style={{ textAlign: 'right', fontWeight: 700, color: Number(row.outstanding) > 0 ? '#e11d48' : '#9ca3af' }}>
+            <div style={{ textAlign: 'right', fontWeight: 700, color: Number(row.outstanding) > 0 ? '#e11d48' : 'var(--text-hint)' }}>
               {formatINR(row.outstanding)}
             </div>
-            <div style={{ textAlign: 'right', color: Number(row.advance) > 0 ? '#059669' : '#9ca3af' }}>
+            <div style={{ textAlign: 'right', color: Number(row.advance) > 0 ? '#059669' : 'var(--text-hint)' }}>
               {formatINR(row.advance)}
             </div>
             <div style={{ color: '#6b7280' }}>
               {row.next_due_date
                 ? <>
                     {formatDateOnly(row.next_due_date)}
-                    <div style={{ fontSize: 12, color: row.days_until_due < 0 ? '#e11d48' : '#9ca3af' }}>
+                    <div style={{ fontSize: 12, color: row.days_until_due < 0 ? '#e11d48' : 'var(--text-hint)' }}>
                       {describeDue(row.days_until_due)}
                     </div>
                   </>

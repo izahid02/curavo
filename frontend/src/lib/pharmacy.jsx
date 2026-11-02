@@ -67,7 +67,7 @@ export function PharmacyProvider({ children }) {
   // rather than in Layout means it is also correct on the login screen, which
   // sits outside the app shell.
   useEffect(() => {
-    document.title = `${pharmacy.pharmacy_name} ERP`;
+    document.title = `${pharmacy.pharmacy_name} · Curavo`;
   }, [pharmacy.pharmacy_name]);
 
   return (

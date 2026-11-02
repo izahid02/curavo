@@ -2212,7 +2212,11 @@ function ProductsTab({ suppliers, showToast }) {
   const [products, setProducts]           = useState([]);
   const [total, setTotal]                 = useState(0);
   const [page, setPage]                   = useState(1);
-  const [search, setSearch]               = useState('');
+  // Starts from ?q= when opened from the dashboard search box, so the list
+  // arrives already filtered.  Typing afterwards works exactly as before.
+  const [search, setSearch]               = useState(
+    () => new URLSearchParams(window.location.search).get('q') ?? ''
+  );
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [loading, setLoading]             = useState(false);
   const [showAddModal, setShowAddModal]   = useState(false);

@@ -1,841 +1,499 @@
 /**
- * Dashboard — wired to real data from GET /api/dashboard/summary.
+ * Dashboard — Curavo design (Nov 2026), wired to real data.
  *
- * Shows 8 stat cards laid out as 2 rows of 4 (see .stats-grid in global.css),
- * a recent-invoices panel, and a top-products panel.
- * All amounts are formatted in the Indian numbering system (₹1,24,500).
+ * Layout, top to bottom (the greeting, search and "New bill" live in the
+ * header, which Layout.jsx draws for this route):
+ *   1. Four stat cards   — today's sales, this month, stock value, patients today
+ *   2. Needs attention   — every "go and do something" item in ONE list, built
+ *                          from real data (expiry, low stock, supplier dues,
+ *                          patient credit, follow-ups, missing generic names).
+ *      Recent bills      — the latest invoices from the summary endpoint.
+ *   3. Money out today   — the expenditure strip; opens the same slide-in
+ *                          ExpenditurePanel the old cards opened.
+ *
+ * HONESTY RULE: every figure and line on this screen comes from the backend.
+ * Nothing is decorative.  Where the design board showed a figure the app does
+ * not track (e.g. "12% vs last Monday"), the card says something true instead.
+ *
+ * Each data source is its own request, so one failing never blanks the page.
+ * All amounts use the Indian numbering system (₹1,24,500).
  */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { getUser } from '../lib/auth';
 import ExpenditurePanel from '../components/dashboard/ExpenditurePanel';
 
 // ---------------------------------------------------------------------------
-// Indian number format helper
+// Formatting helpers
 // ---------------------------------------------------------------------------
 
+/** Whole rupees, Indian grouping: 124580 -> "₹1,24,580". */
 function formatINR(amount) {
   if (amount === null || amount === undefined) return '—';
   return '₹' + Number(amount).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 }
 
-// ---------------------------------------------------------------------------
-// Time-based greeting
-// ---------------------------------------------------------------------------
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
-
-function todayLabel() {
-  return new Date().toLocaleDateString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  });
+/** Rupees and paise, for bill amounts: 186.5 -> "₹186.50". */
+function formatINR2(amount) {
+  if (amount === null || amount === undefined) return '—';
+  return '₹' + Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function currentMonthName() {
   return new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', month: 'long' });
 }
 
+function dayOfMonthIST() {
+  return Number(new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' }));
+}
+
+/** "CASH" -> "Cash" for the mode pill; UPI stays an acronym. */
+function titleCase(s) {
+  if (!s) return '—';
+  if (s === 'UPI') return 'UPI';
+  return s.charAt(0) + s.slice(1).toLowerCase();
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 // ---------------------------------------------------------------------------
-// Skeleton pulse card
+// Shared glass surface (same recipe as .card, with the softer Curavo shadow)
 // ---------------------------------------------------------------------------
 
-/**
- * Every stat card is at least this tall.  All 8 share it so the two rows line
- * up perfectly even though the expenditure cards carry extra content (the
- * category pills) and the patients card carries a new/returning footer.
- */
-const CARD_MIN_HEIGHT = 140;
+const GLASS = {
+  background: 'rgba(255,255,255,0.55)',
+  backdropFilter: 'blur(24px)',
+  WebkitBackdropFilter: 'blur(24px)',
+  border: '1px solid rgba(255,255,255,0.85)',
+  borderRadius: 18,
+  boxShadow: '0 8px 28px rgba(79,70,229,0.07)',
+};
 
-function SkeletonCard() {
+/** Status colours: [text, background].  Text shades pass AA on the tint. */
+const TONE = {
+  amber:  ['#b45309', 'rgba(245,158,11,0.16)'],
+  blue:   ['#0369a1', 'rgba(14,165,233,0.14)'],
+  rose:   ['#be123c', 'rgba(244,63,94,0.13)'],
+  green:  ['#047857', 'rgba(16,185,129,0.14)'],
+  indigo: ['#4338ca', 'rgba(99,102,241,0.13)'],
+};
+const DOT = { amber: '#f59e0b', blue: '#0ea5e9', rose: '#f43f5e', green: '#10b981', indigo: '#6366f1' };
+
+/** Bill payment mode -> pill tone. */
+const MODE_TONE = { CASH: 'green', UPI: 'indigo', CARD: 'blue', CREDIT: 'amber' };
+
+function Pill({ tone, children }) {
+  const [color, bg] = TONE[tone] ?? TONE.indigo;
   return (
-    <div style={{
-      background: 'rgba(255,255,255,0.52)',
-      backdropFilter: 'blur(20px)',
-      border: '1px solid rgba(255,255,255,0.75)',
-      borderRadius: 14,
-      padding: '18px 20px',
-      minHeight: CARD_MIN_HEIGHT,
-      animation: 'pulse 1.5s ease-in-out infinite',
+    <span style={{
+      fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 999,
+      whiteSpace: 'nowrap', color, background: bg,
     }}>
-      <div style={{ height: 10, width: '55%', background: '#e5e7eb', borderRadius: 6, marginBottom: 14 }} />
-      <div style={{ height: 28, width: '70%', background: '#e5e7eb', borderRadius: 6, marginBottom: 10 }} />
-      <div style={{ height: 10, width: '40%', background: '#e5e7eb', borderRadius: 6 }} />
-    </div>
+      {children}
+    </span>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Payment badge colors
+// Stat card
 // ---------------------------------------------------------------------------
 
-const PAYMENT_BADGE = {
-  CASH: 'badge-ok',
-  UPI:  'badge-info',
-  CARD: 'badge-accent',
+/** Line icons for the four cards (24x24 stroke paths). */
+const CARD_ICON = {
+  sales:    'M4 20V10M10 20V4M16 20v-7',
+  month:    'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4',
+  stock:    'M3 7l9-4 9 4-9 4-9-4zM3 7v10l9 4 9-4V7',
+  patients: 'M16 19v-1a4 4 0 00-8 0v1M12 11a3 3 0 100-6 3 3 0 000 6z',
 };
 
-// ---------------------------------------------------------------------------
-// Stat card definition
-// ---------------------------------------------------------------------------
-
-/**
- * The three spend categories shown as pills under each expenditure card.
- * Supplier lumps together money paid at the door and money paid off an older
- * debt — from the owner's point of view both are "paid the distributor", and
- * two near-identical pills would only add noise.  The panel still lists them
- * separately with their own badges.
- */
-function spendPills(period) {
-  if (!period) return [];
-  const supplier = Number(period.supplier_payments ?? 0) + Number(period.credit_payments ?? 0);
-  return [
-    { icon: '🏪', label: 'Supplier', amount: supplier,                    color: '#0284c7' },
-    { icon: '📋', label: 'Expenses', amount: Number(period.expenses ?? 0), color: '#d97706' },
-    { icon: '👤', label: 'Salary',   amount: Number(period.salary ?? 0),   color: '#059669' },
-  ].filter(p => p.amount > 0);   // hide categories with nothing in them
-}
-
-/**
- * The 8 stat cards, in the order they appear in the 4-column grid:
- *
- *   Row 1 │ Today's Sales · Monthly Sales · Inventory Value · Total Patients
- *   Row 2 │ Expiry Alerts · Low Stock · Today's Expenditure · Month Expenditure
- *
- * Order matters — the grid fills left-to-right, so moving an entry in this
- * array moves the card on screen.  Keep the count at 8 or the second row will
- * be ragged.
- *
- * A card may optionally carry a `footer`: JSX pinned to the bottom of the card
- * (see the `marginTop: 'auto'` wrapper in the render below).  Pinning rather
- * than simply appending is what keeps the headline number of all 8 cards on
- * the same baseline.
- */
-function buildCards(data, navigate, spend, openPanel) {
-  const month = currentMonthName();
-  // Older backends (before patients_today was added) would leave this
-  // undefined; falling back to zeros keeps the card rendering instead of
-  // crashing the whole dashboard on a property read.
-  const patients = data.patients_today ?? { total: 0, new_patients: 0, returning: 0 };
-
-  return [
-    {
-      label: "Today's Sales",
-      value: formatINR(data.today_sales),
-      sub: "Today's revenue",
-      subColor: '#6366f1',
-      gradient: 'linear-gradient(90deg, #6366f1, #8b5cf6)',
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
-        </svg>
-      ),
-    },
-    {
-      label: 'Monthly Sales',
-      value: formatINR(data.monthly_sales),
-      sub: `${month} total`,
-      subColor: '#0ea5e9',
-      gradient: 'linear-gradient(90deg, #0ea5e9, #38bdf8)',
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-      ),
-    },
-    {
-      label: 'Inventory Value',
-      value: formatINR(data.inventory_value),
-      sub: 'Stock on hand',
-      subColor: '#10b981',
-      gradient: 'linear-gradient(90deg, #10b981, #34d399)',
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-        </svg>
-      ),
-    },
-    // ── Footfall: how many patients came in today ──────────────────────
-    // The headline is DISTINCT patients billed today; the footer splits them
-    // into first-timers and repeat customers.  Walk-in sales (no patient
-    // record attached) are not counted — see the backend comment.
-    {
-      label: 'Total Patients',
-      value: patients.total,
-      sub: 'Patients seen today',
-      subColor: '#8b5cf6',
-      gradient: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
-      footer: (
-        <div style={{
-          paddingTop: 12,
-          borderTop: '1px solid rgba(0,0,0,0.06)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: 12,
+function StatCard({ label, value, sub, subTone, bar, icon, iconTone, onClick, loading, delay }) {
+  const [iconColor, iconBg] = TONE[iconTone];
+  return (
+    <button
+      onClick={onClick}
+      className="fade-up"
+      style={{
+        ...GLASS,
+        animationDelay: `${delay}s`,
+        position: 'relative', overflow: 'hidden', textAlign: 'left',
+        padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 8,
+        cursor: 'pointer', color: 'inherit', font: 'inherit',
+        transition: 'transform 0.15s, box-shadow 0.15s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(79,70,229,0.12)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = GLASS.boxShadow; }}
+    >
+      {/* Gradient strip along the top — kept from the original design */}
+      <span style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 3, background: bar }} />
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: iconColor, background: iconBg,
         }}>
-          <div>
-            <span style={{ color: '#94a3b8' }}>New </span>
-            <span style={{ fontWeight: 700, color: '#6366f1' }}>{patients.new_patients}</span>
-          </div>
-          <div>
-            <span style={{ color: '#94a3b8' }}>Returning </span>
-            <span style={{ fontWeight: 700, color: '#10b981' }}>{patients.returning}</span>
-          </div>
-        </div>
-      ),
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
-        </svg>
-      ),
-    },
-    {
-      label: 'Expiry Alerts',
-      value: data.expiry_alerts_count,
-      // 60 days is EXPIRY_ALERT_HORIZON_DAYS in inventory_service.py — the
-      // single constant the sidebar badge, this card and the Expiry Alerts
-      // page all count off.  If that changes, change this label too.
-      sub: 'Within 60 days',
-      subColor: '#f43f5e',
-      gradient: 'linear-gradient(90deg, #f43f5e, #fb7185)',
-      clickable: data.expiry_alerts_count > 0,
-      onClick: () => navigate('/expiry-alerts'),
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-      ),
-    },
-    {
-      label: 'Low Stock',
-      value: data.low_stock_count,
-      sub: 'Below minimum',
-      subColor: '#f59e0b',
-      gradient: 'linear-gradient(90deg, #f59e0b, #fbbf24)',
-      clickable: data.low_stock_count > 0,
-      onClick: () => navigate('/inventory'),
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-          <line x1="12" y1="9" x2="12" y2="13"/>
-          <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-      ),
-    },
-    // ── Money OUT, today ───────────────────────────────────────────────
-    // Always clickable, even at ₹0 — "nothing went out today" is a useful
-    // thing to be able to confirm, and a dead card would look broken.
-    {
-      label: "Today's Expenditure",
-      value: formatINR(spend?.today?.total ?? 0),
-      sub: 'Money out today',
-      subColor: '#d97706',
-      gradient: 'linear-gradient(90deg, #d97706, #fbbf24)',
-      clickable: !!spend,
-      onClick: spend ? () => openPanel('today') : undefined,
-      pills: spendPills(spend?.today),
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 1v22"/>
-          <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
-        </svg>
-      ),
-    },
-    // ── Money OUT, this month ──────────────────────────────────────────
-    {
-      label: `${month} Expenditure`,
-      value: formatINR(spend?.month?.total ?? 0),
-      sub: "This month's total",
-      subColor: '#8b5cf6',
-      gradient: 'linear-gradient(90deg, #8b5cf6, #c084fc)',
-      clickable: !!spend,
-      onClick: spend ? () => openPanel('month') : undefined,
-      pills: spendPills(spend?.month),
-      icon: (
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2"/>
-          <line x1="16" y1="2" x2="16" y2="6"/>
-          <line x1="8" y1="2" x2="8" y2="6"/>
-          <line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-      ),
-    },
-  ];
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d={CARD_ICON[icon]} />
+          </svg>
+        </span>
+        <span style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
+      </span>
+      {loading ? (
+        <span style={{ height: 34, width: '60%', borderRadius: 8, background: 'rgba(99,102,241,0.08)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+      ) : (
+        <span style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.02em', color: '#1e1b4b', lineHeight: 1.15 }}>
+          {value}
+        </span>
+      )}
+      <span style={{ fontSize: 13, fontWeight: subTone === 'green' ? 600 : 500, color: subTone === 'green' ? '#047857' : 'var(--text-hint)' }}>
+        {sub}
+      </span>
+    </button>
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Main component
+// "Needs attention" — one list for everything that wants action
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn the separate data sources into attention rows, most urgent first.
+ * Each source is optional: a source that failed to load simply adds nothing.
+ */
+function buildAttention({ summary, supplier, credit, followUps, gaps }) {
+  const rows = [];
+
+  // 1. Supplier money — overdue beats coming due.
+  if (supplier) {
+    const overdue  = supplier.overdue ?? [];
+    const upcoming = supplier.upcoming ?? [];
+    if (overdue.length > 0) {
+      const lead = overdue[0];
+      const late = Math.abs(lead.days_until_due ?? 0);
+      rows.push({
+        key: 'supplier-overdue', tone: 'rose',
+        title: lead.supplier_name,
+        sub: `Supplier payment overdue${late ? ` by ${plural(late, 'day')}` : ''}`
+           + (overdue.length > 1 ? ` · ${overdue.length - 1} more overdue` : ''),
+        tag: formatINR(lead.amount_due),
+        to: '/suppliers?tab=credit',
+      });
+    } else if (upcoming.length > 0) {
+      const lead = upcoming[0];
+      const d = lead.days_until_due;
+      const when = d === 0 ? 'today'
+        : d === 1 ? 'tomorrow'
+        : lead.due_date
+          ? new Date(lead.due_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long' })
+          : `in ${plural(d, 'day')}`;
+      rows.push({
+        key: 'supplier-due', tone: 'amber',
+        title: lead.supplier_name,
+        sub: `Supplier payment due ${when}`,
+        tag: formatINR(lead.amount_due),
+        to: '/suppliers?tab=credit',
+      });
+    }
+  }
+
+  // 2. Expiry — same 60-day count as the sidebar badge and the Expiry page.
+  if (summary?.expiry_alerts_count > 0) {
+    rows.push({
+      key: 'expiry', tone: 'amber',
+      title: `${plural(summary.expiry_alerts_count, 'medicine')} expiring soon`,
+      sub: 'Within 60 days · check what must go back to the supplier',
+      tag: 'Review',
+      to: '/expiry-alerts',
+    });
+  }
+
+  // 3. Low stock.
+  if (summary?.low_stock_count > 0) {
+    rows.push({
+      key: 'low-stock', tone: 'blue',
+      title: `${plural(summary.low_stock_count, 'medicine')} low on stock`,
+      sub: 'Below their minimum stock level',
+      tag: 'Reorder',
+      to: '/inventory',
+    });
+  }
+
+  // 4. Patient credit past due (money owed TO the shop).
+  if (credit && Number(credit.overdue_amount) > 0) {
+    rows.push({
+      key: 'credit', tone: 'amber',
+      title: 'Patient credit overdue',
+      sub: `${plural(credit.overdue_count, 'patient')} past their due date`,
+      tag: formatINR(credit.overdue_amount),
+      to: '/credit?tab=overdue',
+    });
+  }
+
+  // 5. Follow-ups due today.
+  if (followUps > 0) {
+    rows.push({
+      key: 'followups', tone: 'indigo',
+      title: `${plural(followUps, 'follow-up')} due today`,
+      sub: 'Patients waiting for a check-in call or message',
+      tag: 'Open',
+      to: '/follow-ups',
+    });
+  }
+
+  // 6. Medicines the Schedule H1 check cannot see (no generic name).
+  if (gaps > 0) {
+    rows.push({
+      key: 'gaps', tone: 'rose',
+      title: `${plural(gaps, 'medicine')} missing a generic name`,
+      sub: 'Schedule H1 check cannot see them',
+      tag: 'Fix now',
+      to: '/inventory',
+    });
+  }
+
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Page
 // ---------------------------------------------------------------------------
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const user     = getUser();
-  const firstName = user?.full_name?.split(' ')[0] ?? 'there';
 
-  const [data,              setData]          = useState(null);
-  const [loading,           setLoading]       = useState(true);
-  const [error,             setError]         = useState('');
-  const [followUpCount,     setFollowUpCount] = useState(null);
-  const [creditSummary,     setCreditSummary] = useState(null);
-  // Supplier credit = money the pharmacy OWES (opposite direction to the above)
-  const [supplierCredit,    setSupplierCredit] = useState(null);
-  // Expenditure = money that has already LEFT the pharmacy (today + this month)
-  const [spend,             setSpend]         = useState(null);
-  // Which expenditure panel is open: null | 'today' | 'month'
-  const [spendPanel,        setSpendPanel]    = useState(null);
+  const [data,      setData]      = useState(null);   // /dashboard/summary
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
+  const [followUps, setFollowUps] = useState(0);      // due today
+  const [credit,    setCredit]    = useState(null);   // patient credit (owed TO us)
+  const [supplier,  setSupplier]  = useState(null);   // supplier dues (we OWE)
+  const [gaps,      setGaps]      = useState(0);      // medicines with no generic name
+  const [spend,     setSpend]     = useState(null);   // money out, today + month
+  const [spendPanel, setSpendPanel] = useState(null); // null | 'today' | 'month'
+  const [showAll,   setShowAll]   = useState(false);  // "View all" in Needs attention
 
   useEffect(() => {
     api.get('/dashboard/summary')
       .then(({ data: d }) => { setData(d); setLoading(false); })
       .catch(() => { setError('Could not load dashboard data. Is the server running?'); setLoading(false); });
+    // Every other source is independent: a failure leaves the rest intact.
+    api.get('/followup/stats').then(({ data: d }) => setFollowUps(d.due_today ?? 0)).catch(() => {});
+    api.get('/credit/summary').then(({ data: d }) => setCredit(d)).catch(() => {});
+    api.get('/supplier-credit/due-soon').then(({ data: d }) => setSupplier(d)).catch(() => {});
+    api.get('/regulated/missing-generic').then(({ data: d }) => setGaps(Array.isArray(d) ? d.length : 0)).catch(() => {});
+    api.get('/dashboard/expenditure-summary').then(({ data: d }) => setSpend(d)).catch(() => {});
   }, []);
 
-  // Load pending follow-up count independently
-  useEffect(() => {
-    api.get('/followup/pending')
-      .then(({ data: rows }) => setFollowUpCount(rows.length))
-      .catch(() => setFollowUpCount(0));
-  }, []);
+  const pt = data?.patients_today;
+  const cards = [
+    {
+      label: "Today's sales", value: formatINR(data?.today_sales),
+      sub: 'Sales so far today', icon: 'sales', iconTone: 'indigo',
+      bar: 'linear-gradient(90deg,#6366f1,#8b5cf6)', onClick: () => navigate('/invoices'),
+    },
+    {
+      label: 'This month', value: formatINR(data?.monthly_sales),
+      sub: `${plural(dayOfMonthIST(), 'day')} into ${currentMonthName()}`, icon: 'month', iconTone: 'blue',
+      bar: 'linear-gradient(90deg,#0ea5e9,#6366f1)', onClick: () => navigate('/reports'),
+    },
+    {
+      label: 'Stock value', value: formatINR(data?.inventory_value),
+      sub: 'Current stock on hand', icon: 'stock', iconTone: 'green',
+      bar: 'linear-gradient(90deg,#10b981,#0ea5e9)', onClick: () => navigate('/inventory'),
+    },
+    {
+      label: 'Patients today', value: pt ? String(pt.total) : '—',
+      sub: pt ? `${pt.new_patients} new · ${pt.returning} returning` : 'Billed patients today',
+      subTone: pt && pt.total > 0 ? 'green' : undefined,
+      icon: 'patients', iconTone: 'rose',
+      bar: 'linear-gradient(90deg,#ec4899,#8b5cf6)', onClick: () => navigate('/patients'),
+    },
+  ];
 
-  // Load credit overdue summary independently
-  useEffect(() => {
-    api.get('/credit/summary')
-      .then(({ data: d }) => setCreditSummary(d))
-      .catch(() => setCreditSummary(null));
-  }, []);
+  const attention = buildAttention({ summary: data, supplier, credit, followUps, gaps });
+  const shown     = showAll ? attention : attention.slice(0, 4);
 
-  // Load SUPPLIER credit (money we owe) independently — Feature 1.
-  // Kept as its own request so a failure here never blanks the dashboard.
-  useEffect(() => {
-    api.get('/supplier-credit/due-soon')
-      .then(({ data: d }) => setSupplierCredit(d))
-      .catch(() => setSupplierCredit(null));
-  }, []);
+  // Money out today — supplier payments (paid at the door + settled debts),
+  // expenses, salary; and what falls due to suppliers in the next 7 days.
+  const today       = spend?.today;
+  const supplierOut = today ? Number(today.supplier_payments) + Number(today.credit_payments) : 0;
+  const duesWeek    = supplier
+    ? [...(supplier.upcoming ?? []), ...(supplier.overdue ?? [])]
+        .reduce((sum, r) => sum + Number(r.amount_due), 0)
+    : null;
 
-  // Load expenditure (money out) independently — its own request so a failure
-  // here leaves the rest of the dashboard intact.
-  useEffect(() => {
-    api.get('/dashboard/expenditure-summary')
-      .then(({ data: d }) => setSpend(d))
-      .catch(() => setSpend(null));
-  }, []);
-
-  const cards = data ? buildCards(data, navigate, spend, setSpendPanel) : [];
+  const bills = data?.recent_invoices ?? [];
 
   return (
-    <div>
-      {/* ── Heading ───────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b', marginBottom: 2 }}>
-          Dashboard
-        </h1>
-        <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 2 }}>
-          {greeting()}, {firstName}
-        </p>
-        <p style={{ fontSize: 12, color: '#9ca3af' }}>{todayLabel()}</p>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      {/* ── Error banner ──────────────────────────────────────────── */}
       {error && (
         <div style={{
-          background: 'rgba(244,63,94,0.08)',
-          border: '1px solid rgba(244,63,94,0.2)',
-          color: '#e11d48',
-          borderRadius: 10,
-          padding: '10px 16px',
-          fontSize: 13,
-          marginBottom: 18,
+          background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)',
+          color: '#be123c', borderRadius: 12, padding: '10px 16px', fontSize: 13,
         }}>
           {error}
         </div>
       )}
 
-      {/* ── Stat cards — 2 rows of 4 (grid lives in global.css) ───── */}
-      <div className="stats-grid">
-        {loading
-          ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
-          : cards.map((card) => (
-            <div
-              key={card.label}
-              className="fade-up"
-              onClick={card.onClick}
-              style={{
-                background: 'rgba(255,255,255,0.52)',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255,255,255,0.75)',
-                borderRadius: 14,
-                padding: '18px 20px',
-                boxShadow: '0 4px 20px rgba(99,102,241,0.06)',
-                position: 'relative',
-                overflow: 'hidden',
-                cursor: card.clickable ? 'pointer' : 'default',
-                transition: 'transform 0.15s, box-shadow 0.15s',
-                // height 100% makes every card fill its grid row, so the two
-                // rows are flush even when one card has more content than the
-                // rest.  The flex column below is what lets the footer/pills
-                // block push itself to the bottom with marginTop: 'auto'.
-                height: '100%',
-                minHeight: CARD_MIN_HEIGHT,
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-              onMouseEnter={(e) => {
-                if (card.clickable) {
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.boxShadow = '0 8px 28px rgba(99,102,241,0.12)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = '';
-                e.currentTarget.style.boxShadow = '0 4px 20px rgba(99,102,241,0.06)';
-              }}
-            >
-              {/* Top colour bar */}
-              <div style={{
-                position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-                background: card.gradient, borderRadius: '14px 14px 0 0',
-              }} />
-
-              {/* Background glyph */}
-              <div style={{
-                position: 'absolute', top: 10, right: 10,
-                opacity: 0.08, pointerEvents: 'none', color: card.subColor,
-              }}>
-                {card.icon}
-              </div>
-
-              <div style={{
-                fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.07em',
-                color: '#9ca3af', marginBottom: 8, marginTop: 6,
-              }}>
-                {card.label}
-                {card.clickable && (
-                  <span style={{ marginLeft: 6, fontSize: 9, opacity: 0.6 }}>↗</span>
-                )}
-              </div>
-
-              <div style={{ fontSize: 26, fontWeight: 700, color: '#1e1b4b' }}>
-                {card.value}
-              </div>
-
-              <div style={{ fontSize: 11, color: card.subColor, marginTop: 4 }}>
-                {card.sub}
-              </div>
-
-              {/* Bottom block — the new/returning split on the Patients card.
-                  marginTop:'auto' pins it to the bottom of the flex column so
-                  the headline numbers stay aligned across all 8 cards. */}
-              {card.footer && (
-                <div style={{ marginTop: 'auto', paddingTop: 8 }}>
-                  {card.footer}
-                </div>
-              )}
-
-              {/* Category breakdown pills (expenditure cards only).
-                  Pinned to the bottom for the same reason as the footer above.
-                  They wrap rather than shrink, so a long figure like
-                  ₹1,25,000 never gets clipped on a narrow grid column. */}
-              {card.pills?.length > 0 && (
-                <div style={{
-                  display: 'flex', flexWrap: 'wrap', gap: 5,
-                  marginTop: 'auto', paddingTop: 9,
-                }}>
-                  {card.pills.map((pill) => (
-                    <span
-                      key={pill.label}
-                      title={`${pill.label}: ${formatINR(pill.amount)}`}
-                      style={{
-                        fontSize: 10, fontWeight: 600,
-                        padding: '2px 7px', borderRadius: 6,
-                        background: 'rgba(0,0,0,0.04)',
-                        color: pill.color,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {pill.icon} {pill.label} {formatINR(pill.amount)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))
-        }
+      {/* ── 1. Stat cards ─────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+        {cards.map((c, i) => <StatCard key={c.label} {...c} loading={loading} delay={i * 0.05} />)}
       </div>
 
-      {/* ── Expenditure history panel (slide-in from the right) ────── */}
-      {/*
-        Both cards share ONE panel; `spendPanel` decides which period it shows.
-        The monthly view groups by day, today's view is a flat list.
-      */}
+      {/* ── 2. Needs attention + Recent bills ─────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
+
+        <section className="fade-up" style={{ ...GLASS, animationDelay: '0.2s', padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#1e1b4b' }}>Needs attention</h2>
+            {attention.length > 4 && (
+              <button
+                onClick={() => setShowAll((v) => !v)}
+                style={{ background: 'none', padding: 0, fontSize: 14, fontWeight: 500, color: 'var(--accent-dark)' }}
+              >
+                {showAll ? 'Show less' : `View all (${attention.length})`}
+              </button>
+            )}
+          </div>
+
+          {loading ? (
+            [0, 1, 2].map((i) => (
+              <div key={i} style={{ height: 58, borderRadius: 14, background: 'rgba(255,255,255,0.5)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+            ))
+          ) : attention.length === 0 ? (
+            <div style={{ padding: '18px 14px', borderRadius: 14, background: 'rgba(16,185,129,0.10)', color: '#047857', fontSize: 14, fontWeight: 500 }}>
+              All clear — nothing needs your attention right now.
+            </div>
+          ) : (
+            shown.map((r) => (
+              <button
+                key={r.key}
+                onClick={() => navigate(r.to)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left',
+                  padding: '12px 14px', borderRadius: 14, background: 'rgba(255,255,255,0.6)',
+                  color: 'inherit', font: 'inherit', width: '100%',
+                }}
+              >
+                <span style={{ width: 10, height: 10, borderRadius: 999, flexShrink: 0, background: DOT[r.tone] }} />
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: '#1e1b4b' }}>{r.title}</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-hint)' }}>{r.sub}</span>
+                </span>
+                <Pill tone={r.tone}>{r.tag}</Pill>
+              </button>
+            ))
+          )}
+        </section>
+
+        <section className="fade-up" style={{ ...GLASS, animationDelay: '0.25s', padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#1e1b4b' }}>Recent bills</h2>
+            <button
+              onClick={() => navigate('/invoices')}
+              style={{ background: 'none', padding: 0, fontSize: 14, fontWeight: 500, color: 'var(--accent-dark)' }}
+            >
+              Invoice history
+            </button>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '8px 6px' }}>Invoice</th>
+                  <th style={{ padding: '8px 6px' }}>Patient</th>
+                  <th style={{ padding: '8px 6px' }}>Mode</th>
+                  <th style={{ padding: '8px 6px', textAlign: 'right' }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  [0, 1, 2].map((i) => (
+                    <tr key={i}><td colSpan={4} style={{ padding: '10px 6px' }}>
+                      <div style={{ height: 22, borderRadius: 6, background: 'rgba(255,255,255,0.5)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                    </td></tr>
+                  ))
+                ) : bills.length === 0 ? (
+                  <tr style={{ cursor: 'default' }}>
+                    <td colSpan={4} style={{ padding: '14px 6px', color: 'var(--text-hint)', fontSize: 14 }}>
+                      No bills yet today — press F2 to start one.
+                    </td>
+                  </tr>
+                ) : (
+                  bills.map((b) => (
+                    <tr key={b.invoice_number} onClick={() => navigate('/invoices')}>
+                      <td style={{ padding: '12px 6px', fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap' }}>{b.invoice_number}</td>
+                      <td style={{ padding: '12px 6px', fontSize: 14, color: 'var(--text-secondary)' }}>{b.patient_name}</td>
+                      <td style={{ padding: '12px 6px' }}>
+                        <Pill tone={MODE_TONE[b.payment_method] ?? 'indigo'}>{titleCase(b.payment_method)}</Pill>
+                      </td>
+                      <td style={{ padding: '12px 6px', textAlign: 'right', fontSize: 14, fontWeight: 600 }}>{formatINR2(b.total_amount)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      {/* ── 3. Money out today ────────────────────────────────────── */}
+      <section className="fade-up" style={{
+        ...GLASS, animationDelay: '0.3s',
+        padding: '20px 24px', display: 'flex', flexWrap: 'wrap', gap: 28,
+        alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <button
+          onClick={() => spend && setSpendPanel('today')}
+          disabled={!spend}
+          style={{ background: 'none', padding: 0, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, color: 'inherit', font: 'inherit' }}
+          title="See every payment made today"
+        >
+          <span style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 500 }}>Money out today</span>
+          <span style={{ fontSize: 26, fontWeight: 600, color: '#1e1b4b' }}>{today ? formatINR2(today.total) : '—'}</span>
+        </button>
+
+        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-hint)' }}>Supplier payments</span>
+            <span style={{ fontSize: 17, fontWeight: 600 }}>{today ? formatINR(supplierOut) : '—'}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-hint)' }}>Expenses</span>
+            <span style={{ fontSize: 17, fontWeight: 600 }}>{today ? formatINR(today.expenses) : '—'}</span>
+          </div>
+          {today && Number(today.salary) > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-hint)' }}>Salary</span>
+              <span style={{ fontSize: 17, fontWeight: 600 }}>{formatINR(today.salary)}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-hint)' }}>Supplier dues this week</span>
+            <span style={{ fontSize: 17, fontWeight: 600, color: duesWeek > 0 ? '#b45309' : undefined }}>
+              {duesWeek === null ? '—' : formatINR(duesWeek)}
+            </span>
+          </div>
+          {spend?.month && (
+            <button
+              onClick={() => setSpendPanel('month')}
+              style={{ background: 'none', padding: 0, fontSize: 13, fontWeight: 500, color: 'var(--accent-dark)', alignSelf: 'center' }}
+            >
+              {currentMonthName()}: {formatINR(spend.month.total)} →
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* Slide-in breakdown — same panel the old expenditure cards opened. */}
       <ExpenditurePanel
         open={spendPanel !== null}
         onClose={() => setSpendPanel(null)}
-        title={spendPanel === 'month'
-          ? `${currentMonthName()} Expenditure`
-          : "Today's Expenditure"}
+        title={spendPanel === 'month' ? `${currentMonthName()} Expenditure` : "Today's Expenditure"}
         period={spendPanel === 'month' ? spend?.month : spend?.today}
         grouped={spendPanel === 'month'}
       />
-
-      {/* ── Follow-Up Alert Widget ────────────────────────────────── */}
-      {followUpCount !== null && followUpCount > 0 && (
-        <div
-          onClick={() => navigate('/follow-ups')}
-          className="fade-up"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 16,
-            background: 'rgba(255,255,255,0.52)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.75)',
-            borderTop: '3px solid #f59e0b',
-            borderRadius: 14,
-            padding: '14px 20px',
-            marginBottom: 20,
-            cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(245,158,11,0.10)',
-            transition: 'transform 0.15s, box-shadow 0.15s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 28px rgba(245,158,11,0.18)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = '';
-            e.currentTarget.style.boxShadow = '0 4px 20px rgba(245,158,11,0.10)';
-          }}
-        >
-          {/* Icon */}
-          <div style={{
-            width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
-            background: 'rgba(245,158,11,0.12)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 20,
-          }}>
-            📋
-          </div>
-
-          {/* Text */}
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>
-              {followUpCount} follow-up{followUpCount !== 1 ? 's' : ''} due today
-            </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-              Patients waiting for a check-in call or message
-            </div>
-          </div>
-
-          {/* Arrow */}
-          <div style={{ fontSize: 18, color: '#f59e0b', fontWeight: 700, flexShrink: 0 }}>
-            →
-          </div>
-        </div>
-      )}
-
-      {/* ── Credit Overdue Alert Widget ────────────────────────────── */}
-      {creditSummary !== null && creditSummary.overdue_amount > 0 && (
-        <div
-          onClick={() => navigate('/credit?tab=overdue')}
-          className="fade-up"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 16,
-            background: 'rgba(255,255,255,0.52)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.75)',
-            borderTop: '3px solid #e11d48',
-            borderRadius: 14,
-            padding: '14px 20px',
-            marginBottom: 20,
-            cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(225,29,72,0.08)',
-            transition: 'transform 0.15s, box-shadow 0.15s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 28px rgba(225,29,72,0.14)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = '';
-            e.currentTarget.style.boxShadow = '0 4px 20px rgba(225,29,72,0.08)';
-          }}
-        >
-          <div style={{
-            width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
-            background: 'rgba(225,29,72,0.10)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 20,
-          }}>
-            💳
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>
-              Credit overdue: {'₹' + Number(creditSummary.overdue_amount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              {' · '}{creditSummary.overdue_count} patient{creditSummary.overdue_count !== 1 ? 's' : ''}
-            </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-              Past-due credit accounts need attention
-            </div>
-          </div>
-          <div style={{ fontSize: 18, color: '#e11d48', fontWeight: 700, flexShrink: 0 }}>→</div>
-        </div>
-      )}
-
-      {/* ── Supplier Credit Widget (Feature 1) ─────────────────────── */}
-      {/*
-        Only shown when we actually owe someone money.  The card turns red for
-        overdue payments and amber for ones merely coming due, because "you are
-        late" and "plan ahead" need to look different at a glance.
-      */}
-      {supplierCredit !== null && Number(supplierCredit.total_outstanding) > 0 && (() => {
-        const overdue    = supplierCredit.overdue ?? [];
-        const upcoming   = supplierCredit.upcoming ?? [];
-        const isOverdue  = overdue.length > 0;
-        const accent     = isOverdue ? '#e11d48' : '#d97706';
-        const glow       = isOverdue ? 'rgba(225,29,72,'   : 'rgba(217,119,6,';
-
-        // Lead with the single most urgent line: the oldest overdue payment,
-        // or failing that the next one falling due.
-        const lead = isOverdue ? overdue[0] : upcoming[0];
-        let detail = 'All supplier payments are up to date';
-        if (lead) {
-          const amt = '₹' + Number(lead.amount_due).toLocaleString('en-IN', { maximumFractionDigits: 0 });
-          detail = isOverdue
-            ? `${amt} overdue to ${lead.supplier_name}`
-            : `${amt} due in ${lead.days_until_due} day${lead.days_until_due === 1 ? '' : 's'} to ${lead.supplier_name}`;
-        }
-
-        return (
-          <div
-            onClick={() => navigate('/suppliers?tab=credit')}
-            className="fade-up"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 16,
-              background: 'rgba(255,255,255,0.52)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              border: '1px solid rgba(255,255,255,0.75)',
-              borderTop: `3px solid ${accent}`,
-              borderRadius: 14,
-              padding: '14px 20px',
-              marginBottom: 20,
-              cursor: 'pointer',
-              boxShadow: `0 4px 20px ${glow}0.08)`,
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = `0 8px 28px ${glow}0.14)`;
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.transform = '';
-              e.currentTarget.style.boxShadow = `0 4px 20px ${glow}0.08)`;
-            }}
-          >
-            <div style={{
-              width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
-              background: `${glow}0.10)`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 20,
-            }}>
-              🏪
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>
-                Supplier Credit: {formatINR(supplierCredit.total_outstanding)} outstanding
-              </div>
-              <div style={{ fontSize: 12, color: isOverdue ? '#e11d48' : '#6b7280', marginTop: 2 }}>
-                {isOverdue ? '❌ ' : upcoming.length > 0 ? '⚠ ' : ''}{detail}
-              </div>
-            </div>
-            <div style={{ fontSize: 18, color: accent, fontWeight: 700, flexShrink: 0 }}>→</div>
-          </div>
-        );
-      })()}
-
-      {/* ── This Month's Expenses Widget ───────────────────────────── */}
-      {data && data.monthly_expenses > 0 && (
-        <div
-          onClick={() => navigate('/expenditure')}
-          className="fade-up"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 16,
-            background: 'rgba(255,255,255,0.52)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.75)',
-            borderTop: '3px solid #6366f1',
-            borderRadius: 14,
-            padding: '14px 20px',
-            marginBottom: 20,
-            cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(99,102,241,0.08)',
-            transition: 'transform 0.15s, box-shadow 0.15s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 28px rgba(99,102,241,0.14)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = '';
-            e.currentTarget.style.boxShadow = '0 4px 20px rgba(99,102,241,0.08)';
-          }}
-        >
-          <div style={{
-            width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
-            background: 'rgba(99,102,241,0.10)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 20,
-          }}>
-            💸
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>
-              This month's expenses: {formatINR(data.monthly_expenses)}
-            </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-              {data.top_expense_categories?.length
-                ? 'Top: ' + data.top_expense_categories
-                    .map(c => `${c.category} (${formatINR(c.amount)})`)
-                    .join(' · ')
-                : 'Salaries, rent, utilities and more'}
-            </div>
-          </div>
-          <div style={{ fontSize: 18, color: '#6366f1', fontWeight: 700, flexShrink: 0 }}>→</div>
-        </div>
-      )}
-
-      {/* ── Two-column panel row ───────────────────────────────────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-        gap: 16,
-      }}>
-
-        {/* Recent Invoices */}
-        <div style={{
-          background: 'rgba(255,255,255,0.52)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255,255,255,0.75)',
-          borderRadius: 14,
-          padding: '18px 20px',
-          boxShadow: '0 4px 20px rgba(99,102,241,0.06)',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
-              Recent Invoices
-            </span>
-            <span
-              onClick={() => navigate('/invoices')}
-              style={{ fontSize: 11, color: '#6366f1', cursor: 'pointer', fontWeight: 500 }}
-            >
-              View all →
-            </span>
-          </div>
-
-          {loading ? (
-            [1, 2, 3].map((i) => (
-              <div key={i} style={{ height: 36, background: '#e5e7eb', borderRadius: 6, marginBottom: 8, animation: 'pulse 1.5s ease-in-out infinite' }} />
-            ))
-          ) : data?.recent_invoices?.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#9ca3af' }}>No invoices today yet</p>
-          ) : (
-            data?.recent_invoices?.map((inv) => (
-              <div key={inv.invoice_number} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '8px 0',
-                borderBottom: '1px solid rgba(0,0,0,0.04)',
-              }}>
-                <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 600, minWidth: 110 }}>
-                  {inv.invoice_number}
-                </span>
-                <span style={{ fontSize: 12, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {inv.patient_name}
-                </span>
-                <span className={`badge ${PAYMENT_BADGE[inv.payment_method] ?? 'badge-neutral'}`}>
-                  {inv.payment_method ?? '—'}
-                </span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b', minWidth: 70, textAlign: 'right' }}>
-                  {formatINR(inv.total_amount)}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Top Products This Month */}
-        <div style={{
-          background: 'rgba(255,255,255,0.52)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255,255,255,0.75)',
-          borderRadius: 14,
-          padding: '18px 20px',
-          boxShadow: '0 4px 20px rgba(99,102,241,0.06)',
-        }}>
-          <div style={{ marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
-              Top Products This Month
-            </span>
-          </div>
-
-          {loading ? (
-            [1, 2, 3].map((i) => (
-              <div key={i} style={{ height: 36, background: '#e5e7eb', borderRadius: 6, marginBottom: 8, animation: 'pulse 1.5s ease-in-out infinite' }} />
-            ))
-          ) : data?.top_products?.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#9ca3af' }}>No sales this month yet</p>
-          ) : (
-            data?.top_products?.map((prod, idx) => (
-              <div key={prod.product_name} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '8px 0',
-                borderBottom: '1px solid rgba(0,0,0,0.04)',
-              }}>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, color: '#fff',
-                  background: idx === 0 ? '#6366f1' : idx === 1 ? '#0ea5e9' : '#10b981',
-                  borderRadius: '50%', width: 20, height: 20,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}>
-                  {idx + 1}
-                </span>
-                <span style={{ fontSize: 12, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {prod.product_name}
-                </span>
-                <span style={{ fontSize: 11, color: '#9ca3af', minWidth: 50, textAlign: 'right' }}>
-                  {prod.units_sold} units
-                </span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b', minWidth: 70, textAlign: 'right' }}>
-                  {formatINR(prod.revenue)}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-
-      </div>
     </div>
   );
 }

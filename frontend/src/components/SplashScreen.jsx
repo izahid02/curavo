@@ -58,8 +58,8 @@ export default function SplashScreen() {
         overflow: 'hidden', marginBottom: '24px',
         boxShadow: '0 8px 32px rgba(99,102,241,0.2)'
       }}>
-        <img src="/HCC_LOGO.png" alt="HCC"
-             style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
+        <img src="/curavo-logo.svg" alt="Curavo"
+             style={{ width: '100%', height: '100%', display: 'block' }}/>
       </div>
 
       {/* App name */}
@@ -69,14 +69,14 @@ export default function SplashScreen() {
         fontFamily: 'Outfit, sans-serif',
         letterSpacing: '-0.02em'
       }}>
-        Health Care Centre
+        Curavo
       </h1>
       <p style={{
         fontSize: '13px', color: '#6366f1',
         fontWeight: 600, letterSpacing: '0.1em',
         textTransform: 'uppercase', margin: '0 0 48px'
       }}>
-        Pharmacy ERP
+        Pharmacy Management
       </p>
 
       {/* Loading indicator */}

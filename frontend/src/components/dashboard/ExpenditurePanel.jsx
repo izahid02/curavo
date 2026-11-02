@@ -17,6 +17,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import Icon from '../shared/Icon';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -53,10 +54,10 @@ function formatDayHeading(isoDay) {
 // ---------------------------------------------------------------------------
 
 const TYPE_META = {
-  SUPPLIER_PAYMENT: { label: 'SUPPLIER', badge: 'badge-info',    icon: '🏪' },
-  CREDIT_PAYMENT:   { label: 'CREDIT',   badge: 'badge-accent',  icon: '💳' },
-  EXPENSE:          { label: 'EXPENSE',  badge: 'badge-warn',    icon: '📋' },
-  SALARY:           { label: 'SALARY',   badge: 'badge-ok',      icon: '👤' },
+  SUPPLIER_PAYMENT: { label: 'SUPPLIER', badge: 'badge-info',    icon: <Icon name="store" size={14} /> },
+  CREDIT_PAYMENT:   { label: 'CREDIT',   badge: 'badge-accent',  icon: <Icon name="card" size={14} /> },
+  EXPENSE:          { label: 'EXPENSE',  badge: 'badge-warn',    icon: <Icon name="clipboard" size={14} /> },
+  SALARY:           { label: 'SALARY',   badge: 'badge-ok',      icon: <Icon name="user" size={14} /> },
 };
 
 const FALLBACK_META = { label: 'OTHER', badge: 'badge-neutral', icon: '•' };
@@ -76,7 +77,7 @@ function EntryRow({ entry }) {
     }}>
       {/* Time — fixed width so every row's text starts on the same line */}
       <span style={{
-        fontSize: 11, color: '#9ca3af', minWidth: 62, flexShrink: 0,
+        fontSize: 11, color: 'var(--text-hint)', minWidth: 62, flexShrink: 0,
         paddingTop: 2, fontVariantNumeric: 'tabular-nums',
       }}>
         {entry.time || '—'}
@@ -104,7 +105,7 @@ function EntryRow({ entry }) {
         )}
 
         {entry.payment_mode && (
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>
             {entry.payment_mode}
           </div>
         )}
@@ -160,7 +161,7 @@ function DayGroup({ day, entries, expanded, onToggle }) {
           {formatDayHeading(day)}
         </span>
 
-        <span style={{ fontSize: 11, color: '#9ca3af' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>
           {entries.length} item{entries.length !== 1 ? 's' : ''}
         </span>
 
@@ -307,10 +308,10 @@ export default function ExpenditurePanel({ open, onClose, title, period, grouped
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
           {entries.length === 0 ? (
             <div style={{
-              textAlign: 'center', color: '#9ca3af',
+              textAlign: 'center', color: 'var(--text-hint)',
               fontSize: 13, padding: '48px 20px',
             }}>
-              <div style={{ fontSize: 30, marginBottom: 10, opacity: 0.5 }}>💸</div>
+              <div style={{ marginBottom: 10, opacity: 0.5 }}><Icon name="wallet" size={30} /></div>
               No money went out in this period.
             </div>
           ) : grouped ? (

@@ -835,20 +835,25 @@ export default function Billing() {
       doc.setFillColor(...DARK_NAVY);
       doc.rect(0, 0, PW, HEADER_H, 'F');
 
-      // Logo from DOM
-      let logoDataUrl = null;
-      for (const img of document.querySelectorAll('img')) {
-        if (img.src && img.src.includes('HCC_LOGO') && img.complete && img.naturalWidth > 0) {
+      // The SHOP's logo (not Curavo's).  It used to be scraped from whatever
+      // <img> happened to be on screen — the sidebar showed HCC_LOGO.png, so it
+      // always worked.  The sidebar now shows the Curavo mark, so the PDF loads
+      // the shop logo file itself and no longer depends on what is on screen.
+      // If the file is missing, the invoice simply prints without a logo.
+      const logoDataUrl = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
           try {
             const c = document.createElement('canvas');
             c.width = img.naturalWidth;
             c.height = img.naturalHeight;
             c.getContext('2d').drawImage(img, 0, 0);
-            logoDataUrl = c.toDataURL('image/png');
-            break;
-          } catch (_) { }
-        }
-      }
+            resolve(c.toDataURL('image/png'));
+          } catch (_) { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = '/HCC_LOGO.png';
+      });
       if (logoDataUrl) {
         // Vertically centered in header: (35 - 22) / 2 = 6.5mm from top
         doc.addImage(logoDataUrl, 'PNG', ML, 6.5, 22, 22);
@@ -1085,7 +1090,7 @@ export default function Billing() {
       doc.setTextColor(...TEXT_MUTED);
       doc.text('Powered by ARZ Solutions', PW / 2, footerY + 22, { align: 'center' });
 
-      doc.save('HCC-Invoice-' + invoice.invoice_number + '.pdf');
+      doc.save('Invoice-' + invoice.invoice_number + '.pdf');
 
     } catch (err) {
       console.error('printReceipt failed:', err);

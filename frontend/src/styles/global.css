@@ -12,8 +12,11 @@
   --glass-hover:   rgba(255,255,255,0.65);
 
   --text:          #1e1b4b;
-  --text-secondary:#6b7280;
-  --text-hint:     #9ca3af;
+  /* Darkened Nov 2026 (Curavo refresh): the old #6b7280 / #9ca3af greys
+     were hard to read on frosted glass, especially small labels.  These two
+     pass WCAG AA contrast on the glass cards. */
+  --text-secondary:#4b5563;
+  --text-hint:     #6b7280;
 
   --ok:            #059669;
   --ok-bg:         rgba(16,185,129,0.12);
@@ -50,6 +53,9 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Every digit the same width, so prices and quantities line up in columns
+     on bills, tables and reports. */
+  font-variant-numeric: tabular-nums;
   min-height: 100vh;
   background: linear-gradient(145deg,
     #e8f4fd 0%, #dbeeff 25%,
@@ -179,10 +185,10 @@ input.no-spinner::-webkit-inner-spin-button {
 .badge {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  border-radius: 20px;
-  padding: 2px 10px;
+  border-radius: 999px;
+  padding: 3px 10px;
   white-space: nowrap;
 }
 .badge-ok     { background: var(--ok-bg);     color: var(--ok); }
@@ -236,11 +242,11 @@ tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: clamp(4px, 0.85vh, 8px) 12px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: clamp(4px, 0.95vh, 10px) 12px;
+  border-radius: 12px;
+  font-size: 14px;
   font-weight: 500;
-  color: #4b5563;
+  color: #374151;
   text-decoration: none;
   border: 1px solid transparent;
   transition: all 0.18s;
@@ -256,13 +262,28 @@ tbody td { padding: 11px 14px; font-size: 13px; color: var(--text); }
   flex-shrink: 0;
 }
 .nav-item:hover { background: rgba(255,255,255,0.6); color: #1e1b4b; }
+/* Active page: a solid indigo pill (Curavo refresh) — it reads at a glance
+   from across the counter, where the old pale tint did not. */
 .nav-item-active {
-  background: rgba(99,102,241,0.10);
-  color: #6366f1;
+  background: var(--accent);
+  color: #ffffff;
   font-weight: 600;
-  border-radius: 8px;
-  border-color: rgba(99,102,241,0.18);
-  box-shadow: 0 2px 10px rgba(99,102,241,0.10);
+  border-radius: 10px;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(99,102,241,0.32);
+}
+.nav-item-active:hover { background: var(--accent-dark); color: #ffffff; }
+/* Count badge on a nav row (expiry / follow-ups / credit).  Amber: "look at
+   this", not "error" — red is kept for things that are actually wrong. */
+.nav-badge {
+  margin-left: auto;
+  background: #f59e0b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 3px 7px;
 }
 /* Icon inherits the indigo active colour via currentColor stroke. */
 .nav-item-active svg { stroke: currentColor; }

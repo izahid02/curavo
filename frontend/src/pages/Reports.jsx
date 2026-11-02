@@ -11,6 +11,7 @@
  */
 import { useState } from 'react';
 import { api } from '../lib/api';
+import { usePharmacy } from '../lib/pharmacy';
 
 // ---------------------------------------------------------------------------
 // Indian currency formatter — ₹1,24,500
@@ -57,7 +58,9 @@ function getPresetDates(preset) {
 // ---------------------------------------------------------------------------
 // PDF export
 // ---------------------------------------------------------------------------
-async function generatePDF(reportType, data, dateFrom, dateTo) {
+// shopName comes from Pharmacy Settings (passed in by the page) so a report
+// prints the shop that ran it, never a name baked into the code.
+async function generatePDF(reportType, data, dateFrom, dateTo, shopName) {
   // Dynamic import so the large jsPDF bundle is only loaded when needed
   const jsPDF = (await import('jspdf')).default;
   const { default: autoTable } = await import('jspdf-autotable');
@@ -81,10 +84,10 @@ async function generatePDF(reportType, data, dateFrom, dateTo) {
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text('Health Care Centre', 14, 10);
+  doc.text(shopName || 'Pharmacy', 14, 10);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text('Pharmacy ERP', 14, 16);
+  doc.text('Curavo', 14, 16);
 
   const titleText = TITLE_MAP[reportType] || 'Report';
   doc.setFontSize(13);
@@ -143,13 +146,13 @@ async function generatePDF(reportType, data, dateFrom, dateTo) {
     doc.setFontSize(8);
     doc.setTextColor(150);
     doc.text(
-      `Generated on ${today} by Health Care Centre ERP   |   Page ${i} of ${pageCount}`,
+      `Generated on ${today} by Curavo   |   Page ${i} of ${pageCount}`,
       pageW / 2, doc.internal.pageSize.getHeight() - 8,
       { align: 'center' }
     );
   }
 
-  const fileName = `HCC-${TITLE_MAP[reportType].replace(' ', '-')}-${dateFrom}.pdf`;
+  const fileName = `${TITLE_MAP[reportType].replace(' ', '-')}-${dateFrom}.pdf`;
   doc.save(fileName);
 }
 
@@ -264,7 +267,7 @@ async function generateExcel(reportType, data, dateFrom, dateTo) {
   // ── Sheet 3: Extra tables (daily breakdown for sales, trend for profit, etc.)
   buildExcelExtra(reportType, data, wb, XLSX);
 
-  const fileName = `HCC-${TITLE_MAP[reportType]}-${dateFrom}.xlsx`;
+  const fileName = `${TITLE_MAP[reportType]}-${dateFrom}.xlsx`;
   XLSX.writeFile(wb, fileName);
 }
 
@@ -834,6 +837,7 @@ const TABS = [
 ];
 
 export default function Reports() {
+  const { pharmacy } = usePharmacy();
   // Dates — shared across all tabs
   const today = new Date();
   const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
@@ -881,7 +885,7 @@ export default function Reports() {
 
   function handleExportPDF() {
     if (!allData) return;
-    generatePDF(activeTab, allData, dateFrom, dateTo).catch(console.error);
+    generatePDF(activeTab, allData, dateFrom, dateTo, pharmacy.pharmacy_name).catch(console.error);
   }
 
   function handleExportExcel() {

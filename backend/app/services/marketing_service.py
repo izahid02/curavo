@@ -281,13 +281,20 @@ def queue_campaign(db: Session, campaign_id: int, user_id: int) -> CampaignOut:
     # Determine the send time: use scheduled_at if set, otherwise now
     send_time = campaign.scheduled_at or datetime.now(timezone.utc)
 
+    # {shop_name} is the shop's OWN name from Pharmacy Settings.  It used to be
+    # the fixed text "Health Care Centre", which would have had every other
+    # pharmacy's patients receive messages signed by the wrong shop.
+    from app.models.settings import PharmacySettings
+    settings_row = db.query(PharmacySettings).first()
+    shop_name = settings_row.pharmacy_name if settings_row else "your pharmacy"
+
     for patient in patients:
         for msg in campaign.messages:
             # Substitute variables in the message body
             body = (
                 msg.message_body
                 .replace("{patient_name}", patient.name)
-                .replace("{shop_name}", "Health Care Centre")
+                .replace("{shop_name}", shop_name)
             )
 
             # Track recipient in campaign_recipients

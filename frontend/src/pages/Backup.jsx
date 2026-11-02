@@ -126,7 +126,7 @@ export default function Backup() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b', marginBottom: 2 }}>Backup</h1>
-          <p style={{ fontSize: 14, color: '#9ca3af' }}>
+          <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>
             {loading ? 'Loading…'
               : `${backups.length} backup${backups.length !== 1 ? 's' : ''} · ${formatSize(data?.total_bytes || 0)}`}
           </p>

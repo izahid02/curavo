@@ -130,7 +130,7 @@ function SupplierModal({ supplier, onClose, onSaved }) {
           </h2>
           <button onClick={onClose} style={{
             background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 20, color: '#9ca3af', lineHeight: 1,
+            fontSize: 20, color: 'var(--text-hint)', lineHeight: 1,
           }}>×</button>
         </div>
 
@@ -304,7 +304,7 @@ export default function Suppliers() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b', marginBottom: 2 }}>Suppliers</h1>
-          <p style={{ fontSize: 14, color: '#9ca3af' }}>
+          <p style={{ fontSize: 14, color: 'var(--text-hint)' }}>
             {tab === 'credit'
               ? 'Money the pharmacy owes its suppliers'
               : loading ? 'Loading…' : `${suppliers.length} supplier${suppliers.length !== 1 ? 's' : ''}`}
@@ -392,7 +392,7 @@ export default function Suppliers() {
           padding: '12px 20px',
           borderBottom: '1px solid rgba(0,0,0,0.06)',
           fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-          letterSpacing: '0.07em', color: '#9ca3af',
+          letterSpacing: '0.07em', color: 'var(--text-hint)',
         }}>
           <span>Name</span>
           <span>Contact Person</span>
@@ -414,7 +414,7 @@ export default function Suppliers() {
             </div>
           ))
         ) : suppliers.length === 0 ? (
-          <div style={{ padding: '32px 20px', textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
+          <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--text-hint)', fontSize: 14 }}>
             {search ? `No suppliers match "${search}"` : 'No suppliers yet. Add your first one above.'}
           </div>
         ) : (

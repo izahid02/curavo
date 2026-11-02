@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
+import { usePharmacy } from '../lib/pharmacy';
 import { formatDateOnly } from '../lib/datetime';
 
 // ─── tiny helpers ────────────────────────────────────────────────────────────
@@ -480,6 +481,7 @@ function StepTargetAudience({ data, onChange, onBack, onNext, tags, departments 
 // ─── Create Campaign: Step 3 — Message ───────────────────────────────────────
 
 function StepMessage({ data, onChange, onBack, onSubmit, submitting }) {
+  const { pharmacy } = usePharmacy();
   const enBody = data.messages.find(m => m.language === 'EN')?.message_body ?? '';
   const asBody = data.messages.find(m => m.language === 'AS')?.message_body ?? '';
 
@@ -490,8 +492,8 @@ function StepMessage({ data, onChange, onBack, onSubmit, submitting }) {
   }
 
   // Live preview: replace variables with sample values
-  const sampleEN = enBody.replace(/{patient_name}/g, 'Rahul Das').replace(/{shop_name}/g, 'Health Care Centre');
-  const sampleAS = asBody.replace(/{patient_name}/g, 'ৰাহুল দাস').replace(/{shop_name}/g, 'Health Care Centre');
+  const sampleEN = enBody.replace(/{patient_name}/g, 'Rahul Das').replace(/{shop_name}/g, pharmacy.pharmacy_name);
+  const sampleAS = asBody.replace(/{patient_name}/g, 'ৰাহুল দাস').replace(/{shop_name}/g, pharmacy.pharmacy_name);
 
   const enValid = enBody.trim().length > 0;
 

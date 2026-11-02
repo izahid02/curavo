@@ -57,32 +57,28 @@ export default function Login() {
         boxShadow: '0 20px 60px rgba(99,102,241,0.15)',
       }}>
 
-        {/* Logo — round circle with pulse animation */}
+        {/* Curavo logo — the product's mark, with the existing pulse.
+            The logo file is already a rounded indigo tile, so this box only
+            adds the glow; the SHOP's own name is the heading underneath. */}
         <div style={{
-          width: 88, height: 88,
-          borderRadius: '50%',
-          overflow: 'hidden',
+          width: 80, height: 80,
+          borderRadius: 22,
           margin: '0 auto 18px',
-          border: '3px solid rgba(99,102,241,0.2)',
-          boxShadow: '0 4px 20px rgba(99,102,241,0.25)',
+          boxShadow: '0 8px 28px rgba(99,102,241,0.35)',
           animation: 'pulse 2.5s ease-in-out infinite',
-          background: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
         }}>
           <img
-            src="/HCC_LOGO.png"
-            alt={pharmacy.pharmacy_name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            src="/curavo-logo.svg"
+            alt="Curavo"
+            style={{ width: '100%', height: '100%', display: 'block' }}
           />
         </div>
 
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e1b4b', textAlign: 'center' }}>
           {pharmacy.pharmacy_name}
         </h1>
-        <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', marginBottom: 28 }}>
-          Pharmacy ERP — please sign in
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center', marginBottom: 28 }}>
+          Curavo — please sign in
         </p>
 
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -142,7 +138,7 @@ export default function Login() {
           </button>
         </form>
 
-        <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 24 }}>
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 24 }}>
           {pharmacy.pharmacy_name} © {new Date().getFullYear()}
         </p>
 

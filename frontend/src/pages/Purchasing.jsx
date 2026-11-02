@@ -141,7 +141,7 @@ function NewPOModal({ suppliers, products, onClose, onSaved }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1e1b4b', margin: 0 }}>New Purchase Order</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-hint)' }}>×</button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -176,7 +176,7 @@ function NewPOModal({ suppliers, products, onClose, onSaved }) {
             {/* Header row */}
             <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1.5fr 1.5fr 32px', gap: 8, marginBottom: 6 }}>
               {['Product', 'Qty', 'Unit Price (₹)', 'Line Total', ''].map(h => (
-                <span key={h} style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{h}</span>
+                <span key={h} style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{h}</span>
               ))}
             </div>
 
@@ -268,7 +268,7 @@ function PODetailModal({ po, onClose, onStatusChanged, onReceiveAgainst }) {
             <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1e1b4b', margin: '0 0 4px' }}>{po.po_number}</h2>
             <StatusBadge status={po.status} />
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-hint)' }}>×</button>
         </div>
 
         {/* Meta */}
@@ -280,7 +280,7 @@ function PODetailModal({ po, onClose, onStatusChanged, onReceiveAgainst }) {
             ['Total', formatINR(po.total_amount)],
           ].map(([k, v]) => (
             <div key={k}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>{k}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>{k}</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>{v}</div>
             </div>
           ))}
@@ -297,7 +297,7 @@ function PODetailModal({ po, onClose, onStatusChanged, onReceiveAgainst }) {
           <thead>
             <tr>
               {['Product', 'Qty Ordered', 'Unit Price', 'Line Total'].map(h => (
-                <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)' }}>{h}</th>
+                <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -606,7 +606,7 @@ function GRNDetailModal({ grn, onClose }) {
               {grn.po_number && <> · PO: {grn.po_number}</>}
             </span>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-hint)' }}>×</button>
         </div>
 
         {grn.invoice_number && (
@@ -619,7 +619,7 @@ function GRNDetailModal({ grn, onClose }) {
           <thead>
             <tr>
               {['Product', 'Batch', 'Qty', 'Purchase', 'Selling', 'MRP', 'Expiry', 'Total'].map(h => (
-                <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 12 }}>{h}</th>
+                <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 12 }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -809,7 +809,7 @@ export default function Purchasing() {
           </div>
 
           {pos.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 48, color: '#9ca3af', fontSize: 14 }}>
+            <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-hint)', fontSize: 14 }}>
               No purchase orders yet. Click "+ New PO" to create one.
             </div>
           ) : (
@@ -817,7 +817,7 @@ export default function Purchasing() {
               <thead>
                 <tr>
                   {['PO Number', 'Supplier', 'Date', 'Expected', 'Items', 'Total', 'Status'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 10, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 16 }}>{h}</th>
+                    <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 10, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 16 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -882,13 +882,13 @@ export default function Purchasing() {
           {historyTab === 'pos' && (
             <>
               {pos.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af', fontSize: 14 }}>No purchase orders found.</div>
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-hint)', fontSize: 14 }}>No purchase orders found.</div>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       {['PO Number', 'Supplier', 'Order Date', 'Expected', 'Items', 'Total', 'Status'].map(h => (
-                        <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 10, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 16 }}>{h}</th>
+                        <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 10, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 16 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -917,13 +917,13 @@ export default function Purchasing() {
           {historyTab === 'grns' && (
             <>
               {grns.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af', fontSize: 14 }}>No goods receipts found.</div>
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-hint)', fontSize: 14 }}>No goods receipts found.</div>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       {['GRN Number', 'Supplier', 'PO Ref', 'Date', 'Items', 'Total'].map(h => (
-                        <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 10, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 16 }}>{h}</th>
+                        <th key={h} style={{ textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-hint)', textTransform: 'uppercase', letterSpacing: '0.07em', paddingBottom: 10, borderBottom: '1px solid rgba(0,0,0,0.06)', paddingRight: 16 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
