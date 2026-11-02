@@ -39,7 +39,7 @@ from app.schemas.purchasing import (
 def get_next_po_number(db: Session) -> str:
     """
     Generate the next PO number for the current year.
-    Format: HCC-PO-YYYY-NNNNNN  (e.g. HCC-PO-2026-000001)
+    Format: {PREFIX}-PO-YYYY-NNNNNN  (e.g. HCC-PO-2026-000001)
 
     Delegates to get_next_doc_number() which uses BEGIN IMMEDIATE on a
     dedicated connection — safe for concurrent requests, no FOR UPDATE needed.
@@ -47,19 +47,21 @@ def get_next_po_number(db: Session) -> str:
     from app.database import get_next_doc_number
     year = date.today().year
     seq  = get_next_doc_number("PO", year)
-    return f"HCC-PO-{year}-{seq:06d}"
+    from app.services.doc_numbers import get_invoice_prefix
+    return f"{get_invoice_prefix(db)}-PO-{year}-{seq:06d}"
 
 
 def get_next_grn_number(db: Session) -> str:
     """
     Generate the next GRN number for the current year.
-    Format: HCC-GRN-YYYY-NNNNNN  (e.g. HCC-GRN-2026-000001)
+    Format: {PREFIX}-GRN-YYYY-NNNNNN  (e.g. HCC-GRN-2026-000001)
     Same approach as get_next_po_number.
     """
     from app.database import get_next_doc_number
     year = date.today().year
     seq  = get_next_doc_number("GRN", year)
-    return f"HCC-GRN-{year}-{seq:06d}"
+    from app.services.doc_numbers import get_invoice_prefix
+    return f"{get_invoice_prefix(db)}-GRN-{year}-{seq:06d}"
 
 
 # ---------------------------------------------------------------------------

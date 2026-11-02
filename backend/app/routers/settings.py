@@ -23,6 +23,7 @@ from app.database import get_branding_dir, get_db
 from app.models.settings import PharmacySettings
 from app.models.user import User
 from app.schemas.settings import PharmacySettingsOut, PharmacySettingsUpdate
+from app.services import doc_numbers
 from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -84,6 +85,24 @@ def update_pharmacy_settings(
         )
 
     row = get_or_create_settings(db)
+
+    # Invoice prefix: validated (1-4 A-Z/0-9) and locked once this year's first
+    # bill exists - a GST series must not change mid-year.  Blank = unchanged.
+    if (body.invoice_prefix or "").strip():
+        try:
+            new_prefix = doc_numbers.normalise_prefix(body.invoice_prefix)
+        except doc_numbers.InvalidPrefix as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        current = doc_numbers.get_invoice_prefix(db)
+        if new_prefix != current:
+            if doc_numbers.prefix_locked(db):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(f"This year's invoices already use {current}-.  The prefix can be "
+                            f"changed before the first bill of next year, so one year never "
+                            f"mixes two series."),
+                )
+            row.invoice_prefix = new_prefix
 
     row.pharmacy_name = body.pharmacy_name.strip()
     # For the optional fields, a blank string means "clear it" — storing NULL
@@ -194,3 +213,18 @@ def delete_branding_image(kind: str, current_user: User = Depends(get_current_us
     if f is not None:
         f.unlink()
     return {kind: False}
+
+
+@router.get("/invoice-numbering")
+def invoice_numbering(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """
+    For the settings screen: the current prefix, whether it is locked for this
+    year, what the next bill will be numbered, and the longest prefix allowed.
+    Reads only - it never takes a number.
+    """
+    return {
+        "prefix":         doc_numbers.get_invoice_prefix(db),
+        "locked":         doc_numbers.prefix_locked(db),
+        "next_number":    doc_numbers.peek_next_invoice_number(db),
+        "max_length":     doc_numbers.PREFIX_MAX_LEN,
+    }

@@ -36,17 +36,14 @@ from app.services import costing, regulated_register
 
 def get_next_invoice_number(db: Session) -> str:
     """
-    Generate the next sequential invoice number for the current year.
-    Format: HCC-YYYY-NNNNNN  (e.g. HCC-2026-000001)
+    Reserve the next invoice number, e.g. HCC-2026-000014 or SM-2026-000001.
 
-    Thread-safety: delegates to get_next_doc_number() which opens a
-    BEGIN IMMEDIATE transaction on a dedicated connection, serialising all
-    concurrent callers so they can never produce the same sequence number.
+    Kept under its old name for existing imports; the rules (gapless, 16-char
+    GST limit, the shop's own prefix) live in services/doc_numbers.py.
+    Must be called inside the bill's transaction, after every check.
     """
-    from app.database import get_next_doc_number
-    year = date.today().year
-    seq  = get_next_doc_number("INVOICE", year)
-    return f"HCC-{year}-{seq:06d}"
+    from app.services.doc_numbers import take_next_invoice_number
+    return take_next_invoice_number(db)
 
 
 # ---------------------------------------------------------------------------
@@ -163,11 +160,14 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
     The caller (router) does db.commit() after this returns.
     Any exception before commit rolls everything back automatically.
     """
-    # Generate the invoice number FIRST so it can be used as the
-    # 'reference' field on stock movement rows.
-    invoice_number = get_next_invoice_number(db)
-
+    # The invoice number is taken LAST - see "Number the bill" below.  It used
+    # to be taken here, first, and committed on its own connection, so every
+    # bill refused further down (not enough stock, Schedule H1 details missing)
+    # burned a number and left a gap in the GST series.
     pending_items: list[InvoiceItem] = []
+    # Stock movements need the invoice number as their reference, which does
+    # not exist yet; they are held here and added once it does.
+    pending_movements: list[StockMovement] = []
     subtotal  = Decimal("0")
     total_gst = Decimal("0")
 
@@ -229,11 +229,11 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
             batch.quantity_available -= qty
 
             # --- Immutable audit row for every stock change -------------------
-            db.add(StockMovement(
+            pending_movements.append(StockMovement(
                 batch_id=batch.id,
                 movement_type="SALE",
                 quantity=-qty,           # negative = stock going OUT
-                reference=invoice_number,
+                reference=None,          # set to the invoice number below
                 user_id=user_id,
             ))
 
@@ -292,6 +292,15 @@ def create_invoice(db: Session, data: CreateInvoiceRequest, user_id: int) -> Inv
             # 400, not 500: the pharmacist can fix this, and the message names
             # both what is missing and which medicine demanded it.
             raise HTTPException(status_code=400, detail=str(exc))
+
+    # --- Number the bill ---------------------------------------------------
+    # Every check that can refuse this bill has now passed.  Taking the number
+    # here, inside this same transaction, means a failure from now until the
+    # commit rolls the counter back too - the series cannot get a gap.
+    invoice_number = get_next_invoice_number(db)
+    for movement in pending_movements:
+        movement.reference = invoice_number
+        db.add(movement)
 
     invoice = Invoice(
         invoice_number=invoice_number,

@@ -1274,6 +1274,7 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
     pharmacy_name:      pharmacy?.pharmacy_name || '',
     pharmacy_name_as:   pharmacy?.pharmacy_name_as || '',
     invoice_name:       pharmacy?.invoice_name || '',
+    invoice_prefix:     pharmacy?.invoice_prefix || '',
     pharmacy_tagline:   pharmacy?.pharmacy_tagline || '',
     pharmacy_address:   pharmacy?.pharmacy_address || '',
     pharmacy_phone:     pharmacy?.pharmacy_phone || '',
@@ -1283,8 +1284,27 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
+  // Invoice numbering: current prefix, whether it is locked for this year,
+  // and the next number (GET /settings/invoice-numbering).
+  const [numbering, setNumbering] = useState(null);
+
+  useEffect(() => {
+    api.get('/settings/invoice-numbering')
+      .then(({ data }) => {
+        setNumbering(data);
+        // The saved prefix may still be empty on an upgraded shop - show the
+        // one actually in use (read from its last invoice).
+        setForm((prev) => ({ ...prev, invoice_prefix: prev.invoice_prefix || data.prefix }));
+      })
+      .catch(() => {});
+  }, []);
 
   const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  // Live preview of the next number with the prefix as typed.
+  const typedPrefix = (form.invoice_prefix || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const nextPreview = numbering
+    ? numbering.next_number.replace(/^[^-]+/, typedPrefix || numbering.prefix)
+    : null;
 
   async function handleSave() {
     if (!form.pharmacy_name.trim()) {
@@ -1334,6 +1354,23 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
         <input style={modalInput} value={form.invoice_name}
           onChange={(e) => set('invoice_name', e.target.value)}
           placeholder="Leave blank to print the name above in capitals" />
+
+        {/* Invoice number prefix — 1 to 4 capitals/digits (GST caps the whole
+            number at 16 characters), locked once this year's first bill exists
+            so one year never mixes two series.  The backend enforces both. */}
+        <label style={modalLabel}>Invoice number prefix</label>
+        <input style={{ ...modalInput, marginBottom: 4, textTransform: 'uppercase', ...(numbering?.locked ? { opacity: 0.6 } : {}) }}
+          value={form.invoice_prefix}
+          maxLength={numbering?.max_length ?? 4}
+          disabled={numbering?.locked}
+          onChange={(e) => set('invoice_prefix', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+          placeholder="e.g. SM" />
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 14 }}>
+          {nextPreview && <>Next invoice: <b style={{ color: '#1e1b4b' }}>{nextPreview}</b>. </>}
+          {numbering?.locked
+            ? "Locked for this year — invoices have already started. It can be changed before next year's first bill."
+            : 'Up to 4 letters or digits. Locks once the first bill of the year is made.'}
+        </div>
 
         <label style={modalLabel}>Tagline</label>
         <input style={modalInput} value={form.pharmacy_tagline}

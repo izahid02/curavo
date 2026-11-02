@@ -488,6 +488,11 @@ def _run_db_migrations() -> None:
         # Shop name in Assamese, for Assamese patient messages (Curavo, Nov
         # 2026).  NULL = Assamese messages use the ordinary shop name.
         "ALTER TABLE pharmacy_settings ADD COLUMN pharmacy_name_as VARCHAR(150)",
+
+        # Invoice number prefix (Curavo, Nov 2026).  NULL on existing rows;
+        # services/doc_numbers.py then continues the shop's own series (read
+        # from its last invoice), so an upgrade never changes a shop's numbers.
+        "ALTER TABLE pharmacy_settings ADD COLUMN invoice_prefix VARCHAR(8)",
     ]
 
     db = SessionLocal()

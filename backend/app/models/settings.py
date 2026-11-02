@@ -36,6 +36,11 @@ class PharmacySettings(Base):
     # The shop name in Assamese script, used in Assamese patient messages
     # (e.g. HCC = "স্বাস্থ্য সেৱা কেন্দ্ৰ").  NULL = use pharmacy_name.
     pharmacy_name_as = Column(String(150), nullable=True)
+    # Prefix of this shop's invoice numbers ("HCC" -> HCC-2026-000014), 1-4
+    # characters (GST caps the whole number at 16).  NULL until first needed:
+    # services/doc_numbers.py then takes it from the shop's own last invoice,
+    # or "INV" for a new shop, and saves it here.
+    invoice_prefix   = Column(String(8), nullable=True)
     pharmacy_tagline = Column(String(150), nullable=True,  default="Pharmacy & Medical Store")
     pharmacy_address = Column(Text,        nullable=True)
     pharmacy_phone   = Column(String(40),  nullable=True)

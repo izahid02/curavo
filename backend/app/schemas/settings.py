@@ -17,6 +17,7 @@ class PharmacySettingsOut(BaseModel):
     id:                 int
     pharmacy_name:      str
     pharmacy_name_as:   Optional[str] = None
+    invoice_prefix:     Optional[str] = None
     invoice_name:       Optional[str] = None
     pharmacy_tagline:   Optional[str] = None
     pharmacy_address:   Optional[str] = None
@@ -40,6 +41,8 @@ class PharmacySettingsUpdate(BaseModel):
     """
     pharmacy_name:      str = Field(..., min_length=1, max_length=150)
     pharmacy_name_as:   Optional[str] = Field(default=None, max_length=150)
+    # Optional: leaving it out (or blank) keeps the current prefix.
+    invoice_prefix:     Optional[str] = Field(default=None, max_length=8)
     invoice_name:       Optional[str] = Field(default=None, max_length=150)
     pharmacy_tagline:   Optional[str] = Field(default=None, max_length=150)
     pharmacy_address:   Optional[str] = None

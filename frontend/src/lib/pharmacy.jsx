@@ -29,6 +29,7 @@ export const DEFAULT_PHARMACY = {
   id: null,
   pharmacy_name: 'My Pharmacy',
   pharmacy_name_as: null,
+  invoice_prefix: null,
   invoice_name: null,
   pharmacy_tagline: 'Pharmacy & Medical Store',
   pharmacy_address: null,
