@@ -1210,6 +1210,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
 function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
   const [form, setForm] = useState({
     pharmacy_name:      pharmacy?.pharmacy_name || '',
+    invoice_name:       pharmacy?.invoice_name || '',
     pharmacy_tagline:   pharmacy?.pharmacy_tagline || '',
     pharmacy_address:   pharmacy?.pharmacy_address || '',
     pharmacy_phone:     pharmacy?.pharmacy_phone || '',
@@ -1256,6 +1257,13 @@ function PharmacySettingsModal({ pharmacy, onClose, onSaved }) {
         <input style={modalInput} value={form.pharmacy_name}
           onChange={(e) => set('pharmacy_name', e.target.value)}
           placeholder="Health Care Centre" />
+
+        {/* Optional — only needed when the tax invoice must carry a different
+            name from the sign (legal name for the GSTIN, "M/S …", etc.). */}
+        <label style={modalLabel}>Name on invoices</label>
+        <input style={modalInput} value={form.invoice_name}
+          onChange={(e) => set('invoice_name', e.target.value)}
+          placeholder="Leave blank to print the name above in capitals" />
 
         <label style={modalLabel}>Tagline</label>
         <input style={modalInput} value={form.pharmacy_tagline}

@@ -478,6 +478,12 @@ def _run_db_migrations() -> None:
         # The register table itself is created by create_all() (see
         # database.py), because it is a table and not a column.
         "ALTER TABLE products ADD COLUMN register_category TEXT",
+
+        # "Name on invoices" (Curavo, Nov 2026): the name printed on the A4 tax
+        # invoice when it differs from the shop's display name.  NULL on every
+        # existing row, which means "print the shop name in capitals" — so an
+        # upgraded shop's invoices change only if the owner fills it in.
+        "ALTER TABLE pharmacy_settings ADD COLUMN invoice_name VARCHAR(150)",
     ]
 
     db = SessionLocal()

@@ -85,6 +85,7 @@ def update_pharmacy_settings(
     row.pharmacy_name = body.pharmacy_name.strip()
     # For the optional fields, a blank string means "clear it" — storing NULL
     # rather than "" keeps every reader's `value or fallback` check honest.
+    row.invoice_name       = (body.invoice_name or "").strip() or None
     row.pharmacy_tagline   = (body.pharmacy_tagline or "").strip() or None
     row.pharmacy_address   = (body.pharmacy_address or "").strip() or None
     row.pharmacy_phone     = (body.pharmacy_phone or "").strip() or None

@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
+import { usePharmacy } from '../lib/pharmacy';
 import MedicineSearchBox from '../components/shared/MedicineSearchBox';
 import PrescriptionUpload from '../components/billing/PrescriptionUpload';
 import PatientHistoryPanel from '../components/billing/PatientHistoryPanel';
@@ -108,6 +109,8 @@ function lineKeyOf(product) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Billing() {
+  // The shop's own identity (Pharmacy Settings) — printed on the A4 invoice.
+  const { pharmacy } = usePharmacy();
   const searchRef = useRef(null);   // keeps a pointer to the search <input>
   const completeSaleRef = useRef(); // ref so F10 always calls the latest version
   // The scrolling bill-items pane in the left panel.  The search box is pinned
@@ -809,6 +812,10 @@ export default function Billing() {
   async function printReceipt(invoice) {
     if (!invoice) return;
 
+    // Name printed on this tax invoice (header + "For …" signatory line).
+    const invoiceShopName = (pharmacy.invoice_name || '').trim()
+      || (pharmacy.pharmacy_name || '').toUpperCase();
+
     // Color palette
     const DARK_NAVY = [15, 23, 42];
     const ACCENT = [99, 102, 241];
@@ -864,22 +871,38 @@ export default function Billing() {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(13);
       doc.setTextColor(...WHITE);
-      doc.text('M/S HEALTH CARE CENTER', textX, 13);
+      // Everything in this header comes from Pharmacy Settings — it used to be
+      // HCC's own name, address, GSTIN, licence and phone typed into the code,
+      // which every other shop would have printed on ITS tax invoices.
+      //   name    : "Name on invoices" exactly as typed, else the shop name in capitals
+      //   address : the settings address; each line the owner typed is a line
+      //             here (max 2 — the header is 35mm tall).  A single long line
+      //             is wrapped to fit instead.
+      //   right   : GSTIN / DL / Ph, each only if filled in, stacked from the top
+      doc.text(invoiceShopName, textX, 13);
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(255, 255, 255);  // white at 0.75 opacity — jsPDF has no opacity, use white
-      doc.text('Birat Nagar Chariali Bazar, Uttar Raipur PT-III', textX, 18);
-      doc.text('P.O. Bisondai, P.S. Golakganj, Dist- Dhubri, Assam - 783331', textX, 22.5);
+      const ADDRESS_W = PW - MR - 62 - textX;     // stop short of the right-hand column
+      let addrLines = (pharmacy.pharmacy_address || '')
+        .split('\n').map((l) => l.trim()).filter(Boolean);
+      if (addrLines.length === 1) addrLines = doc.splitTextToSize(addrLines[0], ADDRESS_W);
+      if (addrLines.length > 2) addrLines = [addrLines[0], addrLines.slice(1).join(', ')];
+      addrLines.forEach((line, i) => doc.text(line, textX, 18 + i * 4.5));
 
       // Right-side details
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
       doc.setTextColor(...WHITE);
-      doc.text('GSTIN: 18AEWPH3140N1ZZ', PW - MR, 10, { align: 'right' });
-      doc.setFontSize(7.5);
-      doc.text('DL: D/OL/DHB/0543 & D/OL/DHB/0544', PW - MR, 15, { align: 'right' });
-      doc.text('Ph: 6001666271', PW - MR, 20, { align: 'right' });
+      const rightLines = [
+        pharmacy.pharmacy_gstin     && { text: 'GSTIN: ' + pharmacy.pharmacy_gstin, size: 8 },
+        pharmacy.pharmacy_dl_number && { text: 'DL: ' + pharmacy.pharmacy_dl_number, size: 7.5 },
+        pharmacy.pharmacy_phone     && { text: 'Ph: ' + pharmacy.pharmacy_phone, size: 7.5 },
+      ].filter(Boolean);
+      rightLines.forEach(({ text, size }, i) => {
+        doc.setFontSize(size);
+        doc.text(text, PW - MR, 10 + i * 5, { align: 'right' });
+      });
 
       y = HEADER_H;
 
@@ -1078,7 +1101,7 @@ export default function Billing() {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(...TEXT_DARK);
-      doc.text('For M/S HEALTH CARE CENTER', PW - MR, footerY + 8, { align: 'right' });
+      doc.text('For ' + invoiceShopName, PW - MR, footerY + 8, { align: 'right' });
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(...TEXT_MUTED);
