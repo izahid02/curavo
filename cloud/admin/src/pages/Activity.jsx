@@ -10,7 +10,7 @@ const LABEL = {
   change_password: 'Changed panel password',
   upload_release: 'Uploaded an app version', release_pilot: 'Release to pilot shops',
   release_all: 'Release to everyone', release_paused: 'Paused a release',
-  pilot_on: 'Made a pilot shop', pilot_off: 'Removed from pilot',
+  lead_status: 'Updated a lead', pilot_on: 'Made a pilot shop', pilot_off: 'Removed from pilot',
 };
 
 export default function Activity() {

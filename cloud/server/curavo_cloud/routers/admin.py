@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from curavo_cloud import storage
 from curavo_cloud.db import get_db
-from curavo_cloud.models import AdminAudit, AdminUser, Backup, ErrorGroup, Heartbeat, Shop
+from curavo_cloud.models import AdminAudit, AdminUser, Backup, ErrorGroup, Heartbeat, Lead, Shop
 from curavo_cloud.routers.agent import peek_licence
 from curavo_cloud.security import check_password, current_admin, hash_password, make_admin_token
 
@@ -160,6 +160,7 @@ def overview(admin: AdminUser = Depends(current_admin), db: Session = Depends(ge
         "errors_24h": db.query(ErrorGroup).filter(ErrorGroup.last_seen >= day_ago,
                                                   ErrorGroup.resolved_at.is_(None)).count(),
         "storage_bytes": db.query(func.coalesce(func.sum(Backup.size), 0)).scalar(),
+        "new_leads": db.query(Lead).filter(Lead.status == "NEW").count(),
         "server_time": _iso(now),
     }
 

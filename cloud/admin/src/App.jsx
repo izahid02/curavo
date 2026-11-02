@@ -14,6 +14,7 @@ import ShopDetail from './pages/ShopDetail';
 import Errors from './pages/Errors';
 import Activity from './pages/Activity';
 import Releases from './pages/Releases';
+import Leads from './pages/Leads';
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ const ICONS = {
   shops: <><path d="M3 9l1.5-5h15L21 9" /><path d="M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><path d="M9 21v-6h6v6" /></>,
   errors: <><path d="M12 3l9.5 16.5h-19z" /><path d="M12 10v4M12 17.5v.5" /></>,
   activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
+  leads: <><path d="M4 5h16v11H8l-4 4z" /><path d="M8 9h8M8 12h5" /></>,
   releases: <><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M4 19h16" /></>,
 };
 
@@ -49,11 +51,12 @@ function Shell() {
   const navigate = useNavigate();
   const [me, setMe] = useState(null);
   const [openErrors, setOpenErrors] = useState(0);
+  const [newLeads, setNewLeads] = useState(0);
   const [pw, setPw] = useState(false);
 
   useEffect(() => {
     api('/me').then(setMe).catch(() => {});
-    const load = () => api('/overview').then((o) => setOpenErrors(o.errors_open)).catch(() => {});
+    const load = () => api('/overview').then((o) => { setOpenErrors(o.errors_open); setNewLeads(o.new_leads); }).catch(() => {});
     load();
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
@@ -84,6 +87,7 @@ function Shell() {
         {nav('/', 'Overview', 'overview')}
         {nav('/shops', 'Shops', 'shops')}
         {nav('/errors', 'Errors', 'errors', openErrors)}
+        {nav('/leads', 'Leads', 'leads', newLeads)}
         {nav('/releases', 'App updates', 'releases')}
         {nav('/activity', 'Activity', 'activity')}
         <div className="side-user" style={{ marginTop: 'auto', padding: '12px 8px 0', borderTop: '1px solid rgba(0,0,0,0.06)', fontSize: 13 }}>
@@ -102,6 +106,7 @@ function Shell() {
           <Route path="/errors" element={<Errors onChanged={(n) => setOpenErrors(n)} />} />
           <Route path="/activity" element={<Activity />} />
           <Route path="/releases" element={<Releases />} />
+          <Route path="/leads" element={<Leads onChanged={() => api('/overview').then((o) => setNewLeads(o.new_leads)).catch(() => {})} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

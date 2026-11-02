@@ -18,6 +18,9 @@ Settings for the Curavo cloud server, read from environment variables.
                            links.  Default: whatever address the request came to.
   CURAVO_RELEASE_TOKEN     lets the GitHub build upload a new release without
                            a panel login.  Unset = only the panel can upload.
+  CURAVO_SITE_ORIGINS      the website addresses allowed to send the demo form,
+                           comma-separated.  Default: curavo.in and curavo.com
+                           (with and without www).
 """
 import os
 import secrets
@@ -39,6 +42,10 @@ class Settings:
         self.release_dir.mkdir(exist_ok=True)
         self.public_url = os.environ.get("CURAVO_PUBLIC_URL", "").rstrip("/")
         self.release_token = os.environ.get("CURAVO_RELEASE_TOKEN", "")
+        self.site_origins = [o.strip().rstrip("/") for o in os.environ.get(
+            "CURAVO_SITE_ORIGINS",
+            "https://curavo.in,https://www.curavo.in,https://curavo.com,https://www.curavo.com",
+        ).split(",") if o.strip()]
         self.secret = self._secret()
 
     def _secret(self) -> str:

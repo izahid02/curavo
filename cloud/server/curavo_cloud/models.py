@@ -155,3 +155,24 @@ class Release(Base):
     sha256      = Column(String(64))
     created_at  = Column(DateTime, default=utcnow)
     status_changed_at = Column(DateTime, default=utcnow)
+
+
+class Lead(Base):
+    """
+    A pharmacy that asked for a demo on the website.  ARZ works through them in
+    the panel: NEW -> CONTACTED -> TRIAL -> CUSTOMER (or NOT_INTERESTED).
+    Only what the form asks is stored - no IP address, nothing hidden.
+    """
+    __tablename__ = "leads"
+
+    id         = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    name       = Column(String(120), nullable=False)
+    phone      = Column(String(20), nullable=False)
+    shop       = Column(String(150), nullable=False)
+    town       = Column(String(80))
+    current_software = Column(String(60))
+    source     = Column(String(30), default="website")
+    status     = Column(String(20), default="NEW", nullable=False, index=True)
+    notes      = Column(Text)
+    updated_at = Column(DateTime, default=utcnow)

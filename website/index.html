@@ -393,6 +393,8 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
               <option>Marg</option><option>GoFrugal</option><option>Other software</option><option>Paper / register</option>
             </select>
           </label>
+          <!-- Left empty by people; bots fill it in, and their booking is dropped. -->
+          <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label for="f-website">Website<input id="f-website" name="website" tabindex="-1" autocomplete="off"></label></div>
           <button class="btn btn-primary full" type="submit" id="f-submit">Book my demo</button>
           <div class="form-msg full" id="f-msg" role="status" hidden></div>
         </form>
@@ -456,7 +458,7 @@ const SITE = {
   address: '',                  // ARZ Solutions' registered address
   legal_name: '',               // as on the GST / business registration
   download: 'https://cloud.curavo.in/download/windows',
-  leads: '',                    // e.g. 'https://cloud.curavo.in/public/leads' once the cloud is live
+  leads: '',                    // 'https://cloud.curavo.in/public/leads' once the cloud is live (bookings appear in Curavo Control -> Leads)
 };
 
 document.querySelectorAll('[data-contact]').forEach((el) => {
@@ -480,6 +482,7 @@ form.addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Sending…';
   try {
     const res = await fetch(SITE.leads, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (res.status === 429) return show('err', 'Too many attempts. Please message us on WhatsApp' + (SITE.whatsapp ? ' at ' + SITE.whatsapp : '') + '.');
     if (!res.ok) throw new Error();
     form.reset();
     show('ok', 'Thank you. We have your details and will call you within one working day.');

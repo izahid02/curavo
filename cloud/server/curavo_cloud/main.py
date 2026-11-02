@@ -14,13 +14,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from curavo_cloud.config import settings
 from curavo_cloud.db import Base, SessionLocal, engine
 from curavo_cloud.models import AdminUser
-from curavo_cloud.routers import admin, agent, updates
+from curavo_cloud.routers import admin, agent, leads, updates
 from curavo_cloud.security import hash_password
 
 PANEL_DIST = Path(__file__).resolve().parents[2] / "admin" / "dist"
@@ -70,6 +71,13 @@ app = FastAPI(title="Curavo Cloud", lifespan=lifespan, docs_url=None, redoc_url=
 app.include_router(agent.router)
 app.include_router(admin.router)
 app.include_router(updates.router)
+app.include_router(leads.router)
+
+# Only the Curavo website may send the demo form from a browser.  (Shop PCs and
+# the panel are not affected: the PCs do not use a browser, and the panel is
+# served from this same server.)
+app.add_middleware(CORSMiddleware, allow_origins=settings.site_origins,
+                   allow_methods=["POST"], allow_headers=["Content-Type"])
 
 
 @app.get("/health")
@@ -83,7 +91,7 @@ if PANEL_DIST.exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def panel(path: str):
-        if path.startswith(("admin/api", "agent/", "updates/", "download/")):
+        if path.startswith(("admin/api", "agent/", "updates/", "download/", "public/")):
             from fastapi import HTTPException
             raise HTTPException(status_code=404)
         f = (PANEL_DIST / path).resolve()
