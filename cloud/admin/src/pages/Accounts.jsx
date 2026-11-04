@@ -19,6 +19,15 @@ const PLAN_MONTHS = Object.fromEntries(PLANS.map(([k, , n]) => [k, n]));
 // Dates are counted on the local (India) calendar.  toISOString() would give
 // the UTC date - a day early in India - and cost the customer a day.
 function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+const isPaid = (a) => a.paid_until && a.paid_until >= today();
+const TABS = [
+  ['all', 'All active', (a) => !a.disabled],
+  ['waiting', 'Waiting for payment', (a) => !a.disabled && !!a.requested_plan],
+  ['paid', 'Paid', (a) => !a.disabled && isPaid(a)],
+  ['trial', 'Trial / not paid', (a) => !a.disabled && !isPaid(a)],
+  ['disabled', 'Disabled', (a) => a.disabled],
+];
+
 function today() { return ymd(new Date()); }
 function addMonths(from, n) {
   const d = new Date(from + 'T00:00:00');
@@ -34,19 +43,18 @@ export default function Accounts() {
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null);
-  const [waitingOnly, setWaitingOnly] = useState(false);
+  const [tab, setTab] = useState('all');
 
   const load = () => api('/accounts').then(setRows).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
 
   const shown = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    return (rows || []).filter((a) => !waitingOnly || a.requested_plan).filter((a) => {
+    return (rows || []).filter(TABS.find((t) => t[0] === tab)[2]).filter((a) => {
       const hay = [a.email, a.name, a.shop_name, a.town, a.phone, ...a.shops.map((s) => s.shop_code)].join(' ').toLowerCase();
       return words.every((w) => hay.includes(w));
     }).sort((a, b) => (b.requested_plan ? 1 : 0) - (a.requested_plan ? 1 : 0));   // waiting for payment first
-  }, [rows, q, waitingOnly]);
-  const waiting = (rows || []).filter((a) => a.requested_plan).length;
+  }, [rows, q, tab]);
 
   return (
     <>
@@ -56,17 +64,24 @@ export default function Accounts() {
           <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Shop owners signed up on curavo.in. Set a subscription here until online payments exist.</div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className={waitingOnly ? 'btn-primary' : 'btn-secondary'} onClick={() => setWaitingOnly(!waitingOnly)}>
-            Waiting for payment ({waiting})
-          </button>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search email, shop, town, code" style={{ width: 280, maxWidth: '100%' }} />
         </div>
       </header>
       <ErrorNote>{err}</ErrorNote>
 
+      {/* Disabled accounts are kept (their history, their shop PCs) but live in their own tab. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {TABS.map(([k, label, test]) => (
+          <button key={k} className={tab === k ? 'btn-primary' : 'btn-secondary'} style={{ padding: '7px 14px', fontSize: 13.5 }}
+            onClick={() => { setTab(k); setOpen(null); }}>
+            {label} ({(rows || []).filter(test).length})
+          </button>
+        ))}
+      </div>
+
       <section className="card" style={{ padding: 6 }}>
         {!rows ? <div style={{ padding: 14 }}><Empty>Loading…</Empty></div>
-          : shown.length === 0 ? <div style={{ padding: 14 }}><Empty>{rows.length ? 'No account matches.' : 'Nobody has signed up yet.'}</Empty></div> : (
+          : shown.length === 0 ? <div style={{ padding: 14 }}><Empty>{rows.length ? (q ? 'No account matches.' : 'Nothing in this list.') : 'Nobody has signed up yet.'}</Empty></div> : (
             <div style={{ overflowX: 'auto' }}>
               <table>
                 <thead><tr><th>Owner</th><th>Shop</th><th>Shop PCs</th><th>Subscription</th><th>Signed up</th></tr></thead>
