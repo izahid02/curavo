@@ -52,6 +52,8 @@ def send(to: str, subject: str, text: str) -> bool:
     msg["From"] = settings.mail_from
     msg["To"] = to
     msg["Subject"] = subject
+    if settings.mail_reply_to:
+        msg["Reply-To"] = settings.mail_reply_to
     msg.set_content(text)
     try:
         sender(msg)

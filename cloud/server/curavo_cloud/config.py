@@ -26,7 +26,8 @@ Settings for the Curavo cloud server, read from environment variables.
   CURAVO_GOOGLE_CLIENT_IDS the "Sign in with Google" client id(s) from Google's
                            console, comma-separated.  Unset = Google sign-in off.
   CURAVO_MAIL_FROM         sender of account emails, e.g.
-                           "Curavo <no-reply@curavo.in>"
+                           "Curavo <support@curavo.in>"
+  CURAVO_MAIL_REPLY_TO     where replies go (a real inbox), e.g. the CEO's email
   CURAVO_SMTP_HOST/PORT/USER/PASSWORD
                            the email-sending service.  Unset = emails are
                            written to <data>/outbox/ instead of sent (testing).
@@ -57,7 +58,9 @@ class Settings:
         ).split(",") if o.strip()]
         self.site_url = os.environ.get("CURAVO_SITE_URL", "https://curavo.in").rstrip("/")
         self.google_client_ids = [c.strip() for c in os.environ.get("CURAVO_GOOGLE_CLIENT_IDS", "").split(",") if c.strip()]
-        self.mail_from = os.environ.get("CURAVO_MAIL_FROM", "Curavo <no-reply@curavo.in>")
+        self.mail_from = os.environ.get("CURAVO_MAIL_FROM", "Curavo <support@curavo.in>")
+        # Where a customer's reply goes (a real inbox), e.g. the CEO's email.
+        self.mail_reply_to = os.environ.get("CURAVO_MAIL_REPLY_TO", "")
         self.smtp_host = os.environ.get("CURAVO_SMTP_HOST", "")
         self.smtp_port = int(os.environ.get("CURAVO_SMTP_PORT", "587"))
         self.smtp_user = os.environ.get("CURAVO_SMTP_USER", "")
