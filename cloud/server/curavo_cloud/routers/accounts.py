@@ -321,8 +321,15 @@ def reset(body: ResetIn, db: Session = Depends(get_db)):
 # --------------------------------------------------------------- my account
 
 @router.get("/me")
-def me(acc: Account = Depends(current_account)):
-    return _profile(acc)
+def me(acc: Account = Depends(current_account), db: Session = Depends(get_db)):
+    """The profile, plus the shop PCs linked to this account (newest check-in first)."""
+    from curavo_cloud.models import Shop
+    shops = db.query(Shop).filter(Shop.account_id == acc.id).order_by(Shop.last_seen_at.desc()).all()
+    return {**_profile(acc), "pcs": [
+        {"shop_name": s.shop_name or "", "shop_code": f"{s.shop_code[:4]}-{s.shop_code[4:]}",
+         "last_seen_at": s.last_seen_at.isoformat() + "Z" if s.last_seen_at else None,
+         "app_version": s.app_version, "licence_state": s.licence_state, "licence_until": s.licence_until}
+        for s in shops]}
 
 
 class ProfileIn(BaseModel):

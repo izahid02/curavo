@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your Curavo account</title>
+<meta name="description" content="Sign in to Curavo: your shop details, subscription and the Windows download.">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!--
+  Curavo account pages (decided 4 Nov 2026): one file for every screen, so
+  the website stays plain files.  The web server sends these addresses here:
+    /account                 sign in, or "My account" once signed in
+    /account/verify?token=   the link in the "confirm your email" message
+    /account/reset?token=    the link in the "reset your password" message
+    /link?code=ABCD-2345     a shop PC asking to use this account (Allow / Don't allow)
+  Everything it shows comes from the Curavo cloud (SITE.api below); it keeps
+  only the sign-in token, in this browser.
+-->
+<style>
+:root {
+  --paper:  #f5f6fd;
+  --ink:    #1e1b4b;
+  --ink-2:  #4b5170;
+  --hint:   #8a8fa8;
+  --accent: #4f46e5;
+  --accent-soft: rgba(99,102,241,0.12);
+  --mint:   #0f9f78;
+  --mint-soft: rgba(110,231,183,0.22);
+  --line:   rgba(30,27,75,0.10);
+  --glass:  rgba(255,255,255,0.72);
+  --warn:   #b45309;  --warn-soft: #fef3c7;
+  --danger: #be123c;  --danger-soft: #ffe4e6;
+  --font: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body {
+  margin: 0; font-family: var(--font); color: var(--ink); font-size: 16px; line-height: 1.55;
+  background:
+    radial-gradient(900px 520px at 85% -10%, rgba(165,180,252,0.45), transparent 70%),
+    radial-gradient(700px 480px at -10% 30%, rgba(110,231,183,0.22), transparent 70%),
+    var(--paper);
+  min-height: 100vh; -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid rgba(79,70,229,0.45); outline-offset: 2px; border-radius: 6px; }
+.wrap { max-width: 980px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); }
+header { padding-block: 18px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 600; font-size: 20px; }
+.brand svg { width: 32px; height: 32px; }
+main { padding-block: 12px 64px; }
+.narrow { max-width: 440px; margin: 0 auto; }
+.card { background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.9); border-radius: 22px; box-shadow: 0 18px 50px rgba(30,27,75,0.08); padding: 28px; }
+h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+h2 { font-size: 19px; margin: 0 0 12px; font-weight: 600; letter-spacing: -0.01em; }
+.sub { color: var(--ink-2); margin: 0 0 22px; }
+label { display: block; font-size: 14px; font-weight: 500; color: var(--ink-2); margin: 14px 0 6px; }
+input { width: 100%; font: 400 16px/1.3 var(--font); color: var(--ink); background: #fff; border: 1px solid rgba(30,27,75,0.16); border-radius: 12px; padding: 12px 14px; }
+input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,0.18); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: 600 15px/1 var(--font); padding: 13px 20px; border-radius: 12px; border: 1px solid transparent; cursor: pointer; text-decoration: none; }
+.btn[disabled] { opacity: .55; cursor: default; }
+.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 20px rgba(79,70,229,0.25); }
+.btn-ghost { background: #fff; color: var(--ink); border-color: rgba(30,27,75,0.14); }
+.btn-danger { background: #fff; color: var(--danger); border-color: rgba(190,18,60,0.3); }
+.full { width: 100%; margin-top: 20px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.or { display: flex; align-items: center; gap: 12px; color: var(--hint); font-size: 13px; margin: 20px 0 14px; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+.note { border-radius: 12px; padding: 12px 14px; font-size: 14.5px; margin: 0 0 16px; }
+.note.ok { background: var(--mint-soft); color: #065f46; }
+.note.err { background: var(--danger-soft); color: var(--danger); }
+.note.warn { background: var(--warn-soft); color: #92400e; }
+.note.info { background: var(--accent-soft); color: #3730a3; }
+.muted { color: var(--hint); font-size: 13.5px; }
+.code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.08em; background: #fff; border: 1px dashed rgba(79,70,229,0.4); border-radius: 12px; padding: 10px 14px; display: inline-block; }
+.grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; align-items: start; }
+.grid > * { min-width: 0; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .card { padding: 22px; } }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 480px) { .two { grid-template-columns: 1fr; } }
+.pc { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.pc:first-child { border-top: 0; }
+.pill { display: inline-block; font-size: 12.5px; font-weight: 600; border-radius: 999px; padding: 3px 10px; }
+.pill.ok { background: var(--mint-soft); color: #065f46; }
+.pill.warn { background: var(--warn-soft); color: #92400e; }
+.plans { display: grid; gap: 10px; margin-top: 12px; }
+.plan { display: flex; justify-content: space-between; align-items: baseline; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.plan b { font-size: 18px; }
+.top-right { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#gbtn { min-height: 44px; display: flex; justify-content: center; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <a class="brand" href="/" aria-label="Curavo home">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect width="64" height="64" rx="18" fill="url(#lg)"/><rect x="26" y="12" width="12" height="40" rx="4.5" fill="#fff"/><rect x="12" y="26" width="40" height="12" rx="4.5" fill="#fff"/><path d="M13 43 Q25 31 32 34 Q39 37 51 24" stroke="#6ee7b7" stroke-width="5" stroke-linecap="round" fill="none"/></svg>
+    Curavo
+  </a>
+</header>
+<main class="wrap" id="app" aria-live="polite"></main>
+
+<script>
+const SITE = {
+  api: 'https://cloud.curavo.in',            // the Curavo cloud
+  google_client_id: '',                     // "Sign in with Google" client id (Google Cloud console); '' = button hidden
+  download: 'https://cloud.curavo.in/download/windows',
+  whatsapp: '',                             // shown for "pay by UPI" until online payments exist
+  prices: [['Monthly', '₹589', 'about ₹20 a day'], ['Half-yearly', '₹2,899', 'about ₹16 a day'], ['Yearly', '₹4,999', 'about ₹14 a day']],
+};
+
+// ------------------------------------------------------------ small helpers
+const app = document.getElementById('app');
+const TOKEN_KEY = 'curavo_session';
+const AFTER_KEY = 'curavo_after_signin';
+function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+let token = load(TOKEN_KEY);
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmtDate(ymd) {
+  if (!ymd) return '';
+  const d = new Date(ymd.length === 10 ? ymd + 'T00:00:00' : ymd);
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function ago(iso) {
+  if (!iso) return 'not yet';
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 2) return 'just now';
+  if (m < 60) return m + ' min ago';
+  if (m < 48 * 60) return Math.round(m / 60) + ' hr ago';
+  return fmtDate(iso);
+}
+
+async function api(path, { method = 'GET', body } = {}) {
+  const headers = { Accept: 'application/json' };
+  if (body) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = 'Bearer ' + token;
+  let r;
+  try {
+    r = await fetch(SITE.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  } catch (e) {
+    throw Object.assign(new Error('Could not reach Curavo. Check your internet and try again.'), { status: 0 });
+  }
+  let data = null;
+  try { data = await r.json(); } catch (e) { /* empty */ }
+  if (!r.ok) {
+    let msg = 'Something went wrong (' + r.status + '). Please try again.';
+    if (data && typeof data.detail === 'string') msg = data.detail;
+    else if (r.status === 422) msg = 'Please fill in every field.';
+    if (r.status === 401 && token && !path.startsWith('/account/v1/login')) { token = null; store(TOKEN_KEY, null); }
+    throw Object.assign(new Error(msg), { status: r.status });
+  }
+  return data;
+}
+
+function signedIn(t) {
+  token = t; store(TOKEN_KEY, t);
+  const after = load(AFTER_KEY);
+  store(AFTER_KEY, null);
+  if (after) { location.href = after; return; }
+  go('/account');
+}
+
+function go(path) { history.pushState({}, '', path); route(); }
+window.addEventListener('popstate', route);
+
+function note(kind, text) { return text ? `<div class="note ${kind}" role="${kind === 'err' ? 'alert' : 'status'}">${esc(text)}</div>` : ''; }
+
+function busy(form, on) { form.querySelectorAll('button, input').forEach((el) => { el.disabled = on; }); }
+
+// Bind a form: fn returns a promise; errors appear above the form.
+function onSubmit(form, fn) {
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = form.querySelector('.msg');
+    out.innerHTML = '';
+    const data = new FormData(form);      // read BEFORE greying out: disabled fields send nothing
+    busy(form, true);
+    try { await fn(data); } catch (err) { out.innerHTML = note('err', err.message); }
+    finally { if (document.body.contains(form)) busy(form, false); }
+  });
+}
+
+// ------------------------------------------------------------ Google button
+let gsiLoading = null;
+function googleButton(slot) {
+  if (!SITE.google_client_id) { slot.parentElement.querySelector('.or')?.remove(); slot.remove(); return; }
+  gsiLoading = gsiLoading || new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  gsiLoading.then(() => {
+    google.accounts.id.initialize({
+      client_id: SITE.google_client_id,
+      callback: async ({ credential }) => {
+        const out = slot.closest('.card').querySelector('.msg');
+        try { const r = await api('/account/v1/google', { method: 'POST', body: { credential } }); signedIn(r.token); }
+        catch (err) { if (out) out.innerHTML = note('err', err.message); }
+      },
+    });
+    google.accounts.id.renderButton(slot, { theme: 'outline', size: 'large', text: 'continue_with', shape: 'pill', width: 320 });
+  }).catch(() => { slot.innerHTML = '<p class="muted">Google sign-in could not load. Use email and password.</p>'; });
+}
+
+// ------------------------------------------------------------ screens
+function signInScreen(message) {
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>Sign in to Curavo</h1>
+    <p class="sub">${load(AFTER_KEY)?.startsWith('/link') ? 'Sign in to connect your shop PC.' : 'Your shop, subscription and download.'}</p>
+    ${message || ''}
+    <div id="gbtn"></div>
+    <div class="or">or with email</div>
+    <form novalidate>
+      <div class="msg"></div>
+      <label for="em">Email</label><input id="em" name="email" type="email" autocomplete="email" required>
+      <label for="pw">Password</label><input id="pw" name="password" type="password" autocomplete="current-password" required>
+      <button class="btn btn-primary full" type="submit">Sign in</button>
+    </form>
+    <div class="links"><a href="#" data-go="forgot">Forgot password?</a><a href="#" data-go="signup">Create an account</a></div>
+  </div></div>`;
+  googleButton(document.getElementById('gbtn'));
+  wireLinks();
+  onSubmit(app.querySelector('form'), async (f) => {
+    const r = await api('/account/v1/login', { method: 'POST', body: { email: f.get('email'), password: f.get('password') } });
+    signedIn(r.token);
+  });
+}
+
+function signUpScreen() {
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>Create your Curavo account</h1>
+    <p class="sub">For the shop owner. Your staff keep their own logins on the shop PC.</p>
+    <div id="gbtn"></div>
+    <div class="or">or with email</div>
+    <form novalidate>
+      <div class="msg"></div>
+      <label for="nm">Your name</label><input id="nm" name="name" autocomplete="name">
+      <label for="em">Email</label><input id="em" name="email" type="email" autocomplete="email" required>
+      <label for="pw">Password <span class="muted">(at least 8 characters)</span></label>
+      <input id="pw" name="password" type="password" autocomplete="new-password" minlength="8" required>
+      <button class="btn btn-primary full" type="submit">Create account</button>
+      <p class="muted" style="margin-top:12px">By creating an account you agree to the <a href="/terms.html">terms</a> and <a href="/privacy.html">privacy policy</a>.</p>
+    </form>
+    <div class="links"><span></span><a href="#" data-go="signin">I already have an account</a></div>
+  </div></div>`;
+  googleButton(document.getElementById('gbtn'));
+  wireLinks();
+  onSubmit(app.querySelector('form'), async (f) => {
+    const email = (f.get('email') || '').trim();
+    await api('/account/v1/signup', { method: 'POST', body: { email, password: f.get('password'), name: f.get('name') } });
+    checkEmailScreen(email);
+  });
+}
+
+function checkEmailScreen(email) {
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>Check your email</h1>
+    <p class="sub">We sent a link to <b>${esc(email)}</b>. Open it to finish creating your account. It can take a minute; check Spam too.</p>
+    <form novalidate><div class="msg"></div>
+      <input type="hidden" name="email" value="${esc(email)}">
+      <button class="btn btn-ghost" type="submit">Send the link again</button>
+    </form>
+    <div class="links"><a href="#" data-go="signin">Back to sign in</a></div>
+  </div></div>`;
+  wireLinks();
+  onSubmit(app.querySelector('form'), async (f) => {
+    const r = await api('/account/v1/resend-verification', { method: 'POST', body: { email: f.get('email') } });
+    app.querySelector('.msg').innerHTML = note('ok', 'Sent again. ' + (r.message || ''));
+  });
+}
+
+function forgotScreen() {
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>Forgot your password?</h1>
+    <p class="sub">Enter your email and we will send a link to choose a new one.</p>
+    <form novalidate><div class="msg"></div>
+      <label for="em">Email</label><input id="em" name="email" type="email" autocomplete="email" required>
+      <button class="btn btn-primary full" type="submit">Send the link</button>
+    </form>
+    <div class="links"><a href="#" data-go="signin">Back to sign in</a></div>
+  </div></div>`;
+  wireLinks();
+  onSubmit(app.querySelector('form'), async (f) => {
+    const r = await api('/account/v1/forgot', { method: 'POST', body: { email: f.get('email') } });
+    app.querySelector('.msg').innerHTML = note('ok', r.message + ' The link works for 1 hour.');
+  });
+}
+
+async function verifyScreen(tok) {
+  app.innerHTML = `<div class="narrow"><div class="card"><h1>Confirming your email…</h1></div></div>`;
+  try {
+    const r = await api('/account/v1/verify', { method: 'POST', body: { token: tok } });
+    signedIn(r.token);
+  } catch (err) {
+    signInScreen(note('err', err.message + ' If you already confirmed, just sign in.'));
+  }
+}
+
+function resetScreen(tok) {
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>Choose a new password</h1>
+    <p class="sub">This signs you out on every other device.</p>
+    <form novalidate><div class="msg"></div>
+      <label for="pw">New password <span class="muted">(at least 8 characters)</span></label>
+      <input id="pw" name="password" type="password" autocomplete="new-password" minlength="8" required>
+      <button class="btn btn-primary full" type="submit">Save and sign in</button>
+    </form>
+  </div></div>`;
+  onSubmit(app.querySelector('form'), async (f) => {
+    const r = await api('/account/v1/reset', { method: 'POST', body: { token: tok, password: f.get('password') } });
+    signedIn(r.token);
+  });
+}
+
+async function linkScreen(code) {
+  if (!code) { app.innerHTML = `<div class="narrow"><div class="card"><h1>No code</h1><p class="sub">Open this page from the Curavo app on the shop PC.</p></div></div>`; return; }
+  if (!token) { store(AFTER_KEY, '/link?code=' + encodeURIComponent(code)); signInScreen(); return; }
+  app.innerHTML = `<div class="narrow"><div class="card"><h1>Checking the code…</h1></div></div>`;
+  let d;
+  try { d = await api('/account/v1/link/' + encodeURIComponent(code)); }
+  catch (err) {
+    if (err.status === 401) { store(AFTER_KEY, '/link?code=' + encodeURIComponent(code)); signInScreen(); return; }
+    app.innerHTML = `<div class="narrow"><div class="card"><h1>This code can't be used</h1>${note('err', err.message)}<a class="btn btn-ghost" href="/account">Go to my account</a></div></div>`;
+    return;
+  }
+  const isLogin = d.purpose === 'LOGIN';
+  const name = d.shop_name || 'your shop';
+  if (d.linked_to_other_account) {
+    app.innerHTML = `<div class="narrow"><div class="card"><h1>This PC belongs to another account</h1>
+      ${note('warn', `${name} (shop code ${d.shop_code}) is linked to a different Curavo account. If it should be yours, contact ARZ Solutions.`)}
+      <a class="btn btn-ghost" href="/account">Go to my account</a></div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>${isLogin ? 'Sign in on the shop PC?' : 'Connect this shop PC?'}</h1>
+    <p class="sub">${isLogin
+      ? `The Curavo app at <b>${esc(name)}</b> wants to sign you in.`
+      : `<b>${esc(name)}</b> wants to use your Curavo account. Your subscription will then reach this PC by itself.`}</p>
+    <p class="muted">Check the code matches the one on the PC screen:</p>
+    <p><span class="code">${esc(code.toUpperCase())}</span> <span class="muted">· shop code ${esc(d.shop_code)}</span></p>
+    <div class="msg"></div>
+    <div class="row" style="margin-top:18px">
+      <button class="btn btn-primary" id="allow">${isLogin ? 'Yes, sign me in' : 'Allow'}</button>
+      <button class="btn btn-ghost" id="deny">Don't allow</button>
+    </div>
+    <p class="muted" style="margin-top:16px">If you did not just start this on your shop PC, choose Don't allow.</p>
+  </div></div>`;
+  const decide = async (allow) => {
+    app.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try {
+      const r = await api('/account/v1/link/' + encodeURIComponent(code), { method: 'POST', body: { allow } });
+      app.innerHTML = allow
+        ? `<div class="narrow"><div class="card"><h1>${isLogin ? 'Signed in' : 'Connected'} ✓</h1>
+            <p class="sub">Go back to the shop PC - it continues by itself in a few seconds.${r.licence_sent ? ' Your subscription is on its way to it too.' : ''}</p>
+            <a class="btn btn-ghost" href="/account">Go to my account</a></div></div>`
+        : `<div class="narrow"><div class="card"><h1>Not allowed</h1><p class="sub">Nothing was connected. The PC will say so.</p>
+            <a class="btn btn-ghost" href="/account">Go to my account</a></div></div>`;
+    } catch (err) {
+      app.querySelector('.msg').innerHTML = note('err', err.message);
+      app.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    }
+  };
+  document.getElementById('allow').onclick = () => decide(true);
+  document.getElementById('deny').onclick = () => decide(false);
+}
+
+async function accountScreen() {
+  if (!token) { signInScreen(); return; }
+  app.innerHTML = `<div class="card"><h1>Loading…</h1></div>`;
+  let me;
+  try { me = await api('/account/v1/me'); } catch (err) { if (err.status === 401) { signInScreen(); return; } app.innerHTML = note('err', err.message); return; }
+  const sub = me.subscription || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const active = sub.paid_until && sub.paid_until >= today;
+  const pcs = me.pcs || [];
+  app.innerHTML = `
+  <div class="top-right" style="margin-bottom:18px">
+    <div><h1>Hello${me.name ? ', ' + esc(me.name.split(' ')[0]) : ''}</h1><p class="sub" style="margin:0">${esc(me.email)}</p></div>
+    <button class="btn btn-ghost" id="signout">Sign out</button>
+  </div>
+  <div class="grid">
+    <div style="display:grid;gap:18px">
+      <section class="card" aria-labelledby="h-sub">
+        <h2 id="h-sub">Subscription</h2>
+        ${active
+          ? `<p><span class="pill ok">Active</span> &nbsp;until <b>${fmtDate(sub.paid_until)}</b>${sub.plan ? ` · ${esc(sub.plan.replace('_', '-').toLowerCase())}` : ''}</p>
+             <p class="muted" style="margin-top:8px">Reaches your shop PC by itself. Nothing to copy or type.</p>`
+          : `<p><span class="pill warn">Free trial</span> &nbsp;30 days from installing Curavo on your shop PC.</p>
+             <div class="plans">${SITE.prices.map(([n, p, d]) => `<div class="plan"><span>${n}<br><span class="muted">${d}</span></span><b>${p}</b></div>`).join('')}</div>
+             <p class="muted" style="margin-top:12px">GST included. Online payment is coming soon. To subscribe now, pay by UPI and message ARZ Solutions${SITE.whatsapp ? ` on WhatsApp <b>${esc(SITE.whatsapp)}</b>` : ''} - your subscription then reaches your PC by itself.</p>`}
+      </section>
+      <section class="card" aria-labelledby="h-shop">
+        <h2 id="h-shop">Your shop</h2>
+        <form novalidate><div class="msg"></div>
+          <label for="sn">Shop name</label><input id="sn" name="shop_name" value="${esc(me.shop.name)}" autocomplete="organization">
+          <div class="two">
+            <div><label for="ph">Phone</label><input id="ph" name="phone" value="${esc(me.shop.phone)}" inputmode="tel" autocomplete="tel"></div>
+            <div><label for="tw">Town</label><input id="tw" name="town" value="${esc(me.shop.town)}"></div>
+          </div>
+          <label for="gs">GSTIN <span class="muted">(optional)</span></label><input id="gs" name="gstin" value="${esc(me.shop.gstin)}" maxlength="15" style="text-transform:uppercase">
+          <label for="yn">Your name</label><input id="yn" name="name" value="${esc(me.name)}" autocomplete="name">
+          <button class="btn btn-primary" type="submit" style="margin-top:18px">Save</button>
+        </form>
+      </section>
+    </div>
+    <div style="display:grid;gap:18px">
+      <section class="card" aria-labelledby="h-dl">
+        <h2 id="h-dl">Install Curavo</h2>
+        <p class="muted">Windows 10 or 11. After installing, choose <b>Sign in with your Curavo account</b> on the PC.</p>
+        <a class="btn btn-primary full" href="${esc(SITE.download)}">Download for Windows</a>
+      </section>
+      <section class="card" aria-labelledby="h-pc">
+        <h2 id="h-pc">Shop PCs</h2>
+        ${pcs.length ? pcs.map((p) => `<div class="pc"><div><b>${esc(p.shop_name || 'Shop PC')}</b><br><span class="muted">Shop code ${esc(p.shop_code)} · v${esc(p.app_version || '?')}</span></div>
+          <span class="muted" style="text-align:right">Online ${ago(p.last_seen_at)}</span></div>`).join('')
+          : `<p class="muted">None yet. Install Curavo and sign in on the PC with this account.</p>`}
+      </section>
+      <section class="card" aria-labelledby="h-pw">
+        <h2 id="h-pw">${me.has_password ? 'Change password' : 'Add a password'}</h2>
+        ${me.has_password ? '' : '<p class="muted">You sign in with Google. A password lets you sign in with your email too.</p>'}
+        <form novalidate><div class="msg"></div>
+          ${me.has_password ? '<label for="cp">Current password</label><input id="cp" name="current" type="password" autocomplete="current-password">' : ''}
+          <label for="np">New password</label><input id="np" name="new" type="password" autocomplete="new-password" minlength="8">
+          <button class="btn btn-ghost" type="submit" style="margin-top:16px">Save password</button>
+        </form>
+      </section>
+    </div>
+  </div>`;
+  document.getElementById('signout').onclick = () => { token = null; store(TOKEN_KEY, null); signInScreen(note('ok', 'Signed out.')); };
+  const [shopForm, pwForm] = app.querySelectorAll('form');
+  onSubmit(shopForm, async (f) => {
+    await api('/account/v1/me', { method: 'PATCH', body: { shop_name: f.get('shop_name'), phone: f.get('phone'), town: f.get('town'), gstin: f.get('gstin'), name: f.get('name') } });
+    shopForm.querySelector('.msg').innerHTML = note('ok', 'Saved.');
+  });
+  onSubmit(pwForm, async (f) => {
+    const r = await api('/account/v1/me/password', { method: 'POST', body: { current: f.get('current') || '', new: f.get('new') } });
+    token = r.token; store(TOKEN_KEY, r.token);
+    pwForm.reset();
+    pwForm.querySelector('.msg').innerHTML = note('ok', 'Password saved. Other devices were signed out.');
+  });
+}
+
+// ------------------------------------------------------------ routing
+function wireLinks() {
+  app.querySelectorAll('[data-go]').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    ({ signin: () => signInScreen(), signup: signUpScreen, forgot: forgotScreen })[a.dataset.go]();
+    window.scrollTo(0, 0);
+  }));
+}
+
+function route() {
+  const params = new URLSearchParams(location.search);
+  // Opened as a plain file (preview), the page name comes from ?page=
+  let path = location.pathname.replace(/\/+$/, '');
+  if (path.endsWith('.html')) path = '/' + (params.get('page') || 'account');
+  if (path === '/link') return linkScreen(params.get('code'));
+  if (path === '/account/verify') return verifyScreen(params.get('token'));
+  if (path === '/account/reset') return resetScreen(params.get('token'));
+  if (location.hash === '#signup' && !token) return signUpScreen();
+  return accountScreen();
+}
+route();
+</script>
+</body>
+</html>

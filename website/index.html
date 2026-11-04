@@ -67,13 +67,17 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .top nav { display: flex; gap: 22px; margin-left: auto; }
 .top nav a { color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500; }
 .top nav a:hover { color: var(--ink); }
+.top .signin { color: var(--accent); text-decoration: none; font-size: 15px; font-weight: 600; white-space: nowrap; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: 600 15px/1 var(--font-body); padding: 13px 20px; border-radius: 12px; text-decoration: none; border: 1px solid transparent; cursor: pointer; transition: transform .15s, box-shadow .15s, background .15s; white-space: nowrap; }
 .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 22px rgba(79,70,229,0.30); }
 .btn-primary:hover { background: #4338ca; transform: translateY(-1px); }
 .btn-ghost { background: var(--glass-strong); color: var(--ink); border-color: var(--line); }
 .btn-ghost:hover { background: #fff; }
 .top .btn { padding: 10px 16px; font-size: 14px; }
-@media (max-width: 860px) { .top nav { display: none; } .top .btn { margin-left: auto; } }
+@media (max-width: 860px) { .top nav { display: none; } .top .signin { margin-left: auto; } }
+.top .btn .short { display: none; }
+@media (max-width: 420px) { .top .wrap { gap: 14px; } .top .btn { padding: 11px 14px; font-size: 14px; } }
+@media (max-width: 380px) { .top .btn .long { display: none; } .top .btn .short { display: inline; } }
 
 /* ---------- hero ---------- */
 .hero { padding-block: clamp(40px, 6vw, 80px) 40px; }
@@ -208,7 +212,8 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
       <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
     </nav>
-    <a class="btn btn-primary" href="#start">Try free for 30 days</a>
+    <a class="signin" href="/account">Sign in</a>
+    <a class="btn btn-primary" href="#start"><span class="long">Try free for 30 days</span><span class="short">Try free</span></a>
   </div>
 </header>
 
