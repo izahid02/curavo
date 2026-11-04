@@ -135,6 +135,7 @@ label.plan:has(input:checked) .radio { border: 5px solid var(--accent); }
 .steps li:not(:last-child)::after { content: ""; width: 22px; height: 1px; background: var(--line); margin-left: 4px; }
 .steps li span { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(30,27,75,0.16); font-size: 12px; font-weight: 600; background: #fff; }
 .steps li.now { color: var(--ink); font-weight: 600; }
+@media (max-width: 420px) { .steps { gap: 4px; font-size: 13px; } .steps li:not(:last-child)::after { width: 10px; } }
 .steps li.now span { background: var(--accent); border-color: var(--accent); color: #fff; }
 .steps li.done span { background: var(--mint-soft); border-color: transparent; color: #065f46; }
 .summary { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 4px 16px; margin-bottom: 12px; }
@@ -142,6 +143,16 @@ label.plan:has(input:checked) .radio { border: 5px solid var(--accent); }
 .kv:first-child { border-top: 0; }
 .kv span { color: var(--ink-2); }
 .kv b { font-weight: 600; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.checkout { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; align-items: start; max-width: 900px; margin: 0 auto; }
+.checkout > * { min-width: 0; }
+@media (max-width: 760px) { .checkout { grid-template-columns: 1fr; } .order { order: -1; } .order .ticks, .order-foot { display: none; } }
+.back-link { display: block; max-width: 900px; margin: 0 auto 14px; text-decoration: none; font-weight: 500; font-size: 15px; }
+.order { position: sticky; top: 18px; }
+.order .kv { border: 0; padding: 4px 0 0; font-size: 17px; }
+.ticks { list-style: none; padding: 0; margin: 0 0 14px; display: grid; gap: 8px; font-size: 14.5px; color: var(--ink-2); }
+.ticks li { padding-left: 24px; position: relative; }
+.ticks li::before { content: "✓"; position: absolute; left: 2px; color: var(--mint); font-weight: 700; }
+.order-foot { border-top: 1px solid var(--line); padding-top: 12px; margin: 0; }
 fieldset.bare { border: 0; padding: 0; margin: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 [hidden] { display: none !important; }
@@ -498,7 +509,7 @@ function subscriptionCard(me, flow) {
   const sub = me.subscription || {};
   const active = sub.paid_until && sub.paid_until >= todayYmd();
   const head = `<h2 id="h-sub">Subscription</h2>`;
-  if (flow) return checkoutSteps(card, me, flow);
+  if (flow) return checkoutPage(me, flow);
 
   if (sub.requested_plan && planOf(sub.requested_plan)) {          // waiting for ARZ
     const [, n, price] = planOf(sub.requested_plan);
@@ -544,12 +555,39 @@ function subscriptionCard(me, flow) {
   card.querySelectorAll('.plan-chip').forEach((b) => { b.onclick = () => subscriptionCard(me, { step: 1, plan: b.dataset.plan }); });
 }
 
+// The plan steps get a page of their own: the steps on the left, the order
+// on the right, nothing else to distract.  Leaving it reloads My account.
+function checkoutPage(me, flow) {
+  const [, n, price, perDay] = planOf(flow.plan) || planOf('YEARLY');
+  app.innerHTML = `
+  <a href="/account" class="back-link" id="toacct">← My account</a>
+  <div class="checkout">
+    <section class="card" aria-labelledby="h-sub" id="subcard"></section>
+    <aside class="card order" aria-label="Your order">
+      <h2>Your order</h2>
+      <div class="kv"><span>Curavo ${esc(n)}</span><b>${esc(price)}</b></div>
+      <p class="muted" style="margin:2px 0 14px">${esc(perDay)} · GST included</p>
+      <ul class="ticks">
+        <li>Billing, stock, expiry and patients</li>
+        <li>Daily cloud backup</li>
+        <li>Bills even without internet</li>
+        <li>Automatic updates</li>
+        <li>Support on WhatsApp</li>
+      </ul>
+      <p class="muted order-foot">Nothing is charged online. Our team calls you to complete the payment by UPI.</p>
+    </aside>
+  </div>`;
+  document.getElementById('toacct').onclick = (e) => { e.preventDefault(); accountScreen(); };
+  checkoutSteps(document.getElementById('subcard'), me, flow);
+  window.scrollTo(0, 0);
+}
+
 function checkoutSteps(card, me, flow) {
   const labels = ['Plan', 'Shop details', 'Confirm'];
   const steps = `<ol class="steps" aria-label="Steps">${labels.map((l, i) => `<li class="${i + 1 < flow.step ? 'done' : i + 1 === flow.step ? 'now' : ''}"${i + 1 === flow.step ? ' aria-current="step"' : ''}><span>${i + 1}</span>${l}</li>`).join('')}</ol>`;
   const back = (to) => `<button class="btn btn-ghost" type="button" data-back="${to}">${to ? 'Back' : 'Cancel'}</button>`;
   const wire = () => card.querySelectorAll('[data-back]').forEach((b) => {
-    b.onclick = () => (b.dataset.back === '0' ? subscriptionCard(me) : subscriptionCard(me, { ...flow, step: Number(b.dataset.back) }));
+    b.onclick = () => (b.dataset.back === '0' ? accountScreen() : subscriptionCard(me, { ...flow, step: Number(b.dataset.back) }));
   });
 
   if (flow.step === 1) {
@@ -560,6 +598,10 @@ function checkoutSteps(card, me, flow) {
       <p class="muted" style="margin-top:12px">GST included. All features in every plan.</p>
       <div class="btn-row">${back(0)}<button class="btn btn-primary" type="submit">Continue</button></div></form>`;
     wire();
+    card.querySelectorAll('input[name=plan]').forEach((r) => r.addEventListener('change', () => {
+      checkoutPage(me, { step: 1, plan: r.value });          // the order summary follows the choice
+      card.ownerDocument.querySelector(`#subcard input[value="${r.value}"]`)?.focus();
+    }));
     card.querySelector('form').addEventListener('submit', (e) => {
       e.preventDefault();
       subscriptionCard(me, { step: 2, plan: new FormData(e.target).get('plan') || flow.plan });
@@ -576,7 +618,6 @@ function checkoutSteps(card, me, flow) {
       if (!String(f.get('shop_name') || '').trim() || !String(f.get('phone') || '').trim())
         throw new Error('Please fill in the shop name and phone number.');
       Object.assign(me, await api('/account/v1/me', { method: 'PATCH', body: shopBody(f) }));
-      shopCard(me);
       subscriptionCard(me, { ...flow, step: 3 });
     });
     return;
@@ -591,14 +632,14 @@ function checkoutSteps(card, me, flow) {
       ${row('Phone', esc(me.shop.phone))}
       ${row('Payment', 'By UPI, when our team calls you')}
     </div>
-    <p class="muted">Nothing is charged now. Your free trial keeps running until the payment is done.</p>
+    <p class="muted">Your free trial keeps running until the payment is done.</p>
     <form novalidate><div class="msg"></div>
       <div class="btn-row">${back(2)}<button class="btn btn-primary" type="submit">Confirm request</button></div></form>`;
   wire();
   onSubmit(card.querySelector('form'), async () => {
-    Object.assign(me, await api('/account/v1/me/plan-request', { method: 'POST', body: { plan: flow.plan } }));
-    subscriptionCard(me);
-    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    await api('/account/v1/me/plan-request', { method: 'POST', body: { plan: flow.plan } });
+    await accountScreen();            // My account, now showing "Request received"
+    window.scrollTo(0, 0);
   });
 }
 
