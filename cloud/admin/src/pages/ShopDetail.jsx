@@ -35,6 +35,15 @@ export default function ShopDetail({ onChanged }) {
     } catch (e) { setErr(e.message); }
   }
 
+  // Unlinking frees the shop for a new owner (the shop changed hands); two
+  // clicks so it is never done by accident.
+  const [unlinkArmed, setUnlinkArmed] = useState(false);
+  async function unlinkAccount() {
+    if (!unlinkArmed) { setUnlinkArmed(true); setTimeout(() => setUnlinkArmed(false), 4000); return; }
+    try { await api(`/shops/${shopCode}/unlink-account`, { method: 'POST' }); setUnlinkArmed(false); load(); }
+    catch (e) { setErr(e.message); }
+  }
+
   async function saveNotes() {
     await api(`/shops/${shopCode}`, { method: 'PATCH', body: { notes } });
     setNotesSaved(true);
@@ -114,6 +123,14 @@ export default function ShopDetail({ onChanged }) {
             <dt>{s.licence_state === 'TRIAL' ? 'Trial ends' : 'Paid until'}</dt><dd>{day(s.licence_until)}</dd>
             <dt>Key number</dt><dd>{s.licence_serial != null ? `#${s.licence_serial}` : '—'}</dd>
             <dt>Key waiting</dt><dd>{s.pending_licence_until ? `Until ${day(s.pending_licence_until)} - delivered on next check-in` : 'None'}</dd>
+            <dt>Owner account</dt>
+            <dd>
+              {s.account
+                ? <><Link to="/accounts">{s.account.email}</Link>{' '}
+                    <button className="btn-secondary" style={{ padding: '2px 8px', fontSize: 12, marginLeft: 6 }}
+                      onClick={unlinkAccount}>{unlinkArmed ? 'Click again to unlink' : 'Unlink…'}</button></>
+                : 'Not linked'}
+            </dd>
           </dl>
           <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', flex: 1 }}>
             <label className="lbl" htmlFor="notes">Notes (only ARZ sees these)</label>

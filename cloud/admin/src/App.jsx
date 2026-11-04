@@ -1,6 +1,6 @@
 /**
  * Curavo Control - ARZ Solutions' view of every Curavo shop.
- * Routes: /login, / (overview), /shops, /shops/:code, /errors, /activity
+ * Routes: /login, / (overview), /shops, /shops/:code, /accounts, /errors, /activity
  */
 import React, { useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
@@ -15,6 +15,7 @@ import Errors from './pages/Errors';
 import Activity from './pages/Activity';
 import Releases from './pages/Releases';
 import Leads from './pages/Leads';
+import Accounts from './pages/Accounts';
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ const ICONS = {
   activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
   leads: <><path d="M4 5h16v11H8l-4 4z" /><path d="M8 9h8M8 12h5" /></>,
   releases: <><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M4 19h16" /></>,
+  accounts: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
 };
 
 function Icon({ name }) {
@@ -86,6 +88,7 @@ function Shell() {
         </div>
         {nav('/', 'Overview', 'overview')}
         {nav('/shops', 'Shops', 'shops')}
+        {nav('/accounts', 'Accounts', 'accounts')}
         {nav('/errors', 'Errors', 'errors', openErrors)}
         {nav('/leads', 'Leads', 'leads', newLeads)}
         {nav('/releases', 'App updates', 'releases')}
@@ -106,6 +109,7 @@ function Shell() {
           <Route path="/errors" element={<Errors onChanged={(n) => setOpenErrors(n)} />} />
           <Route path="/activity" element={<Activity />} />
           <Route path="/releases" element={<Releases />} />
+          <Route path="/accounts" element={<Accounts />} />
           <Route path="/leads" element={<Leads onChanged={() => api('/overview').then((o) => setNewLeads(o.new_leads)).catch(() => {})} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
