@@ -191,6 +191,35 @@ def accept_claim(db: Session, pairing: OwnerPairing, claim: dict) -> tuple[bool,
 # The summary itself
 # ---------------------------------------------------------------------------
 
+LOGO_PX = 128            # the phone shows it at 40 px; 128 stays sharp on any screen
+
+
+def logo_thumbnail():
+    """
+    The shop's logo (Pharmacy Settings) as a small PNG data URI for the phone,
+    or None when no logo is uploaded.  Made once and kept beside the logo
+    (logo-thumb.png), remade only when the logo changes, so a 2 MB upload
+    never travels to the phone - only a few KB.  Never raises: a broken image
+    just means no logo on the phone.
+    """
+    from app.database import get_branding_dir
+    try:
+        folder = get_branding_dir()
+        src = next((folder / f"logo.{e}" for e in ("png", "jpg", "webp") if (folder / f"logo.{e}").exists()), None)
+        if src is None:
+            return None
+        thumb = folder / "logo-thumb.png"
+        if not thumb.exists() or thumb.stat().st_mtime < src.stat().st_mtime:
+            from PIL import Image
+            with Image.open(src) as im:
+                im = im.convert("RGBA")
+                im.thumbnail((LOGO_PX, LOGO_PX))
+                im.save(thumb, "PNG", optimize=True)
+        return "data:image/png;base64," + _b64(thumb.read_bytes())
+    except Exception:
+        return None
+
+
 def _sales_by_mode(db: Session, start, end) -> dict:
     """Net sales (after returns) and bill count between two UTC instants, by payment mode."""
     from app.models.billing import Invoice
@@ -243,7 +272,7 @@ def build_summary(db: Session) -> dict:
     lic = licence.licence_status(db)
     ps = db.query(PharmacySettings).order_by(PharmacySettings.id).first()
     base = {"v": 1, "generated_at": datetime.utcnow().isoformat() + "Z",
-            "shop": {"name": ps.pharmacy_name if ps else "", "code": lic["shop_code"]},
+            "shop": {"name": ps.pharmacy_name if ps else "", "code": lic["shop_code"], "logo": logo_thumbnail()},
             "licence": {"state": lic["state"], "days_left": lic.get("days_left"), "headline": lic["headline"]}}
     if lic["restricted"]:
         # Decided Nov 2026: the owner app pauses with reports when the

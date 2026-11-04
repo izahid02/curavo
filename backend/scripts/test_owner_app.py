@@ -210,6 +210,23 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app, raise_server_exception
     else:
         print("  SKIP  phone JavaScript check (run npm install in mobile/ first)")
 
+    print("[4b] The shop's logo reaches the phone, small")
+    check("no logo uploaded -> none sent", s["shop"].get("logo"), None)
+    import io
+    from PIL import Image
+    big = io.BytesIO()
+    Image.new("RGB", (1200, 800), (99, 102, 241)).save(big, "PNG")
+    r = shop.post("/api/settings/branding/logo", headers=H,
+                  files={"file": ("logo.png", big.getvalue(), "image/png")})
+    check("logo uploaded on the PC", r.status_code in (200, 201), True)
+    agent.run_once()
+    s = p1.open(p1.summary().json()["locked"])
+    logo = s["shop"].get("logo") or ""
+    check("phone gets the logo as a picture", logo.startswith("data:image/png;base64,"), True)
+    check("...a small copy, not the 1200 px upload", len(logo) < 30000, True)
+    thumb = Image.open(io.BytesIO(base64.b64decode(logo.split(",", 1)[1])))
+    check("...at most 128 px", max(thumb.size) <= 128, True)
+
     print("[5] A second phone; each opens only its own copy")
     r = shop.post("/api/owner-app/pairings", headers=H).json()
     p2 = Phone(cloud, "Manager phone")

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
     "@noble/ciphers": "1.3.0",
     "@noble/curves": "1.9.1",
     "@noble/hashes": "1.8.0",

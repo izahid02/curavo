@@ -6,8 +6,9 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState, FlatList, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View,
+  AppState, FlatList, Image, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CloudError, fetchSummary, unlink } from './cloud';
 import { ago, clock, dayMonth, expiryMonth, inr, parseUtc, stockQty } from './format';
@@ -99,12 +100,21 @@ export default function Shop({ link, notifications, onEnableNotifications, onDis
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={{ paddingTop: insets.top + 10, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line }}>
-        <Text style={{ fontSize: 18, fontWeight: '700', color: C.text }} numberOfLines={1}>
-          {sm?.shop?.name || link.shopName || 'Your shop'}
-        </Text>
-        <Text style={{ fontSize: 12.5, color: stale ? C.warn : C.sub, marginTop: 2 }}>
-          {madeAt ? `Figures from ${clock(madeAt)} · ${ago(madeAt)}` : 'Waiting for figures'}
-        </Text>
+        <View style={s.row}>
+          {/* The shop's own logo (Pharmacy Settings on the PC), when it has one. */}
+          {sm?.shop?.logo ? (
+            <Image source={{ uri: sm.shop.logo }} resizeMode="contain" accessibilityLabel="Shop logo"
+              style={{ width: 40, height: 40, borderRadius: 10, marginRight: 12, backgroundColor: C.bg }} />
+          ) : null}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: C.text }} numberOfLines={1}>
+              {sm?.shop?.name || link.shopName || 'Your shop'}
+            </Text>
+            <Text style={{ fontSize: 12.5, color: stale ? C.warn : C.sub, marginTop: 2 }}>
+              {madeAt ? `Figures from ${clock(madeAt)} · ${ago(madeAt)}` : 'Waiting for figures'}
+            </Text>
+          </View>
+        </View>
       </View>
       {stale && tab !== 'more' && (
         <View style={{ backgroundColor: C.warnBg, paddingHorizontal: 16, paddingVertical: 8 }}>
@@ -135,17 +145,30 @@ function attentionTotal(sm) {
 }
 
 function TabBar({ tab, setTab, bottom, counts }) {
-  const tabs = [['today', 'Today'], ['stock', 'Stock'], ['credit', 'Credit'], ['more', 'More']];
+  // [id, label, icon when selected, icon otherwise]
+  const tabs = [
+    ['today', 'Today', 'today', 'today-outline'],
+    ['stock', 'Stock', 'cube', 'cube-outline'],
+    ['credit', 'Credit', 'wallet', 'wallet-outline'],
+    ['more', 'More', 'ellipsis-horizontal-circle', 'ellipsis-horizontal-circle-outline'],
+  ];
   return (
     <View style={{ flexDirection: 'row', backgroundColor: C.card, borderTopWidth: 1, borderColor: C.line, paddingBottom: bottom }}>
-      {tabs.map(([id, label]) => {
+      {tabs.map(([id, label, iconOn, iconOff]) => {
         const on = tab === id;
         return (
-          <Pressable key={id} onPress={() => setTab(id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12 }}
-            accessibilityRole="tab" accessibilityState={{ selected: on }}>
-            <View style={{ width: 28, height: 4, borderRadius: 2, backgroundColor: on ? C.accent : 'transparent', marginBottom: 6 }} />
-            <Text style={{ fontSize: 13.5, fontWeight: on ? '700' : '500', color: on ? C.accent : C.sub }}>
-              {label}{id === 'today' && counts ? `  •` : ''}
+          <Pressable key={id} onPress={() => setTab(id)} style={{ flex: 1, alignItems: 'center', paddingTop: 8, paddingBottom: 10 }}
+            accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={label}>
+            <View>
+              <Ionicons name={on ? iconOn : iconOff} size={24} color={on ? C.accent : C.sub} />
+              {/* Red dot on Today: something needs attention. */}
+              {id === 'today' && counts ? (
+                <View style={{ position: 'absolute', top: -1, right: -4, width: 9, height: 9, borderRadius: 5,
+                  backgroundColor: C.danger, borderWidth: 1.5, borderColor: C.card }} />
+              ) : null}
+            </View>
+            <Text style={{ fontSize: 12, fontWeight: on ? '700' : '500', color: on ? C.accent : C.sub, marginTop: 3 }}>
+              {label}
             </Text>
           </Pressable>
         );
