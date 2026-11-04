@@ -83,7 +83,7 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app) as shop:
 
     print("[2] Nothing uploaded yet")
     check("no update offered", offer("0.2.0", "PLTSHP23"), 204)
-    check("website download: nothing yet", cloud.get("/download/windows", follow_redirects=False).status_code, 404)
+    check("website download: no link -> refused", cloud.get("/download/windows", follow_redirects=False).status_code, 403)
 
     print("[3] Uploads")
     check("wrong file name refused", up("setup.exe").status_code, 400)
@@ -123,8 +123,14 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app) as shop:
     check("beta 0.3.0-beta.2 -> 0.3.0 offered", offer("0.3.0-beta.2", "NRMSHP45").get("version"), "0.3.0")
     got = cloud.get("/updates/files/Curavo_0.3.0_x64-setup.exe")
     check("installer downloads intact", got.content == FAKE_EXE, True)
+    # The website's Download button needs the 15-minute link My account gives an ACTIVE account.
+    from curavo_cloud.config import settings as _cs
+    from jose import jwt as _jwt
+    from datetime import datetime as _dt, timedelta as _td
+    _t = _jwt.encode({"sub": "1", "aud": "curavo-download", "exp": _dt.utcnow() + _td(minutes=15)}, _cs.account_secret, algorithm="HS256")
+    check("website download without a link -> refused", cloud.get("/download/windows", follow_redirects=False).status_code, 403)
     check("website download -> newest for everyone",
-          cloud.get("/download/windows", follow_redirects=False).headers.get("location"),
+          cloud.get(f"/download/windows?t={_t}", follow_redirects=False).headers.get("location"),
           "/updates/files/Curavo_0.3.0_x64-setup.exe")
     check("only installer names are served", cloud.get("/updates/files/cloud.db").status_code, 404)
     check("no walking out of the folder", cloud.get("/updates/files/..%2Fcloud.db").status_code != 200, True)

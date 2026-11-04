@@ -20,13 +20,17 @@ const PLAN_MONTHS = Object.fromEntries(PLANS.map(([k, , n]) => [k, n]));
 // the UTC date - a day early in India - and cost the customer a day.
 function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 const isPaid = (a) => a.paid_until && a.paid_until >= today();
+const onFree = (a) => a.on_free_month && isPaid(a);
 const TABS = [
-  ['all', 'All active', (a) => !a.disabled],
-  ['waiting', 'Waiting for payment', (a) => !a.disabled && !!a.requested_plan],
-  ['paid', 'Paid', (a) => !a.disabled && isPaid(a)],
-  ['trial', 'Trial / not paid', (a) => !a.disabled && !isPaid(a)],
+  ['all', 'All', (a) => !a.disabled],
+  ['waiting', 'Waiting for you', (a) => !a.disabled && !!a.requested_plan],
+  ['free', 'Free month - collect payment', (a) => !a.disabled && onFree(a)],
+  ['paid', 'Paid', (a) => !a.disabled && isPaid(a) && !a.on_free_month],
+  ['inactive', 'Not active', (a) => !a.disabled && !isPaid(a) && !a.requested_plan],
   ['disabled', 'Disabled', (a) => a.disabled],
 ];
+
+function banner(bg) { return { display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 10, background: bg, fontSize: 13.5 }; }
 
 function today() { return ymd(new Date()); }
 function addMonths(from, n) {
@@ -117,11 +121,13 @@ export default function Accounts() {
                                 <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }} title={when(a.requested_at)}>chose {timeAgo(a.requested_at)}</div>
                               </div>
                             )}
-                            {active
+                            {active && a.on_free_month
+                              ? <><span className="badge badge-info">Free month</span><div style={{ fontSize: 12.5, marginTop: 3 }}>{PLAN_LABEL[a.plan] || a.plan || ''} · free until {fmt(a.paid_until)}</div></>
+                              : active
                               ? <><span className="badge badge-ok">Paid</span><div style={{ fontSize: 12.5, marginTop: 3 }}>{PLAN_LABEL[a.plan] || a.plan || ''} · until {fmt(a.paid_until)}</div></>
                               : a.paid_until
                                 ? <><span className="badge badge-danger">Ended</span><div style={{ fontSize: 12.5, marginTop: 3 }}>{fmt(a.paid_until)}</div></>
-                                : <span className="badge badge-neutral">Trial / not paid</span>}
+                                : <span className="badge badge-neutral">Not active</span>}
                           </td>
                           <td title={when(a.created_at)}>{timeAgo(a.created_at)}</td>
                         </tr>
@@ -148,12 +154,24 @@ function SubscriptionEditor({ account, onSaved, onError }) {
   const [plan, setPlan] = useState(account.requested_plan || account.plan || 'YEARLY');
   const base0 = account.paid_until && account.paid_until > today() ? account.paid_until : today();
   // A waiting request comes pre-filled: check the payment arrived, then just press Save.
-  const [until, setUntil] = useState(account.requested_plan ? addMonths(base0, PLAN_MONTHS[account.requested_plan] || 12) : (account.paid_until || ''));
+  const fillPlan = account.requested_plan || (account.on_free_month ? account.plan : null);
+  const [until, setUntil] = useState(fillPlan ? addMonths(base0, PLAN_MONTHS[fillPlan] || 12) : (account.paid_until || ''));
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState('');
   const [confirmDisable, setConfirmDisable] = useState(false);
   // "Add" counts from the later of today and the current end, so paying early never loses days.
   const base = account.paid_until && account.paid_until > today() ? account.paid_until : today();
+
+  async function activate() {
+    setBusy(true); setDone('');
+    try {
+      const r = await api(`/accounts/${account.id}/start-free-month`, { method: 'POST' });
+      setDone(`Activated: free month until ${fmt(r.paid_until)}. The owner got an email; the download is unlocked.`
+        + (r.keys_sent ? ` Licence sent to ${r.keys_sent} shop PC${r.keys_sent > 1 ? 's' : ''}.` : ''));
+      onSaved();
+    } catch (e) { onError(e.message); }
+    finally { setBusy(false); }
+  }
 
   async function save(body) {
     setBusy(true); setDone('');
@@ -170,13 +188,35 @@ function SubscriptionEditor({ account, onSaved, onError }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-    {account.requested_plan && (
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', fontSize: 13.5 }}>
+    {account.requested_plan && !account.free_month_used && (
+      <div style={banner('rgba(245,158,11,0.12)')}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <b>New shop: wants {PLAN_LABEL[account.requested_plan]} ({PLAN_PRICE[account.requested_plan] || ''})</b>, chose {timeAgo(account.requested_at)}.
+          {' '}Call <b style={{ userSelect: 'all' }}>{account.phone || 'no phone'}</b>, then press <b>Activate</b>: the first month is free,
+          the download unlocks and the owner gets an email. Collect the {PLAN_PRICE[account.requested_plan] || ''} before the free month ends.
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn-primary" disabled={busy} onClick={activate}>Activate - start free month</button>
+          <button className="btn-secondary" disabled={busy} onClick={() => save({ clear_request: true })}>Dismiss</button>
+        </div>
+      </div>
+    )}
+    {account.requested_plan && account.free_month_used && (
+      <div style={banner('rgba(245,158,11,0.12)')}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <b>Wants {PLAN_LABEL[account.requested_plan]} ({PLAN_PRICE[account.requested_plan] || ''})</b>, chose {timeAgo(account.requested_at)}.
           {' '}Call <b style={{ userSelect: 'all' }}>{account.phone || 'no phone'}</b>, collect the payment, then press <b>Save subscription</b> below (already filled in).
         </div>
         <button className="btn-secondary" disabled={busy} onClick={() => save({ clear_request: true })}>Dismiss request</button>
+      </div>
+    )}
+    {!account.requested_plan && account.on_free_month && account.paid_until >= today() && (
+      <div style={banner('rgba(14,165,233,0.12)')}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <b>Free month until {fmt(account.paid_until)}</b> on {PLAN_LABEL[account.plan] || account.plan}.
+          {' '}Collect <b>{PLAN_PRICE[account.plan] || ''}</b> from <b style={{ userSelect: 'all' }}>{account.phone || 'the owner'}</b>, then press <b>Save subscription</b> below:
+          the date is already set to {PLAN_LABEL[account.plan] ? `${PLAN_MONTHS[account.plan]} month${PLAN_MONTHS[account.plan] > 1 ? 's' : ''}` : 'the plan'} after the free month.
+        </div>
       </div>
     )}
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>

@@ -255,6 +255,11 @@ class Account(Base):
     # sets the subscription in Curavo Control (which clears it).
     requested_plan  = Column(String(20))             # MONTHLY / HALF_YEARLY / YEARLY
     requested_at    = Column(DateTime)
+    # Every new shop's first month is free (decided 4 Nov 2026): ARZ presses
+    # "Activate" in Curavo Control, the plan starts with one free month, and
+    # the plan's price is collected before it ends.  Once per account, ever.
+    free_month_used = Column(Boolean, default=False, nullable=False)
+    on_free_month   = Column(Boolean, default=False, nullable=False)   # cleared when the first payment is saved
 
 
 class AccountToken(Base):

@@ -362,6 +362,7 @@ def _account_row(db, a) -> dict:
             "disabled": a.disabled, "shop_name": a.shop_name, "phone": a.phone, "town": a.town, "gstin": a.gstin,
             "plan": a.plan, "paid_until": a.paid_until,
             "requested_plan": a.requested_plan, "requested_at": _iso(a.requested_at),
+            "free_month_used": a.free_month_used, "on_free_month": a.on_free_month,
             "shops": [{"shop_code": s.shop_code, "shop_name": s.shop_name} for s in shops]}
 
 
@@ -408,6 +409,7 @@ def update_account(account_id: int, body: AccountPatch, admin: AdminUser = Depen
         if body.paid_until:
             a.requested_plan = None    # paid and switched on: the request is done
             a.requested_at = None
+            a.on_free_month = False    # a saved subscription = a payment; the free month is over
     if body.clear_request:
         a.requested_plan = None
         a.requested_at = None
@@ -430,3 +432,53 @@ def unlink_account(code: str, admin: AdminUser = Depends(current_admin), db: Ses
     shop.account_id = None
     db.commit()
     return {"ok": True}
+
+
+@router.post("/accounts/{account_id}/start-free-month")
+def start_free_month(account_id: int, admin: AdminUser = Depends(current_admin), db: Session = Depends(get_db)):
+    """
+    "Activate" in Curavo Control: the shop's chosen plan starts with ONE free
+    month (once per account).  The download unlocks on curavo.in, the cloud
+    issues the licence key to the shop's PC, and the owner gets an email.
+    ARZ collects the plan's price before the month ends.
+    """
+    from curavo_cloud import licence_issuer, mailer
+    from curavo_cloud.config import settings
+    from curavo_cloud.dates import add_months, today_ist
+    a = db.get(Account, account_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="No such account.")
+    if a.free_month_used:
+        raise HTTPException(status_code=400, detail="This account already had its free month.")
+    if a.paid_until and a.paid_until >= today_ist().isoformat():
+        raise HTTPException(status_code=400, detail="This account is already active.")
+    plan = a.requested_plan or a.plan
+    if plan not in ("MONTHLY", "HALF_YEARLY", "YEARLY"):
+        raise HTTPException(status_code=400, detail="The owner has not chosen a plan yet.")
+    a.plan = plan
+    a.paid_until = add_months(today_ist(), 1).isoformat()
+    a.free_month_used = True
+    a.on_free_month = True
+    a.requested_plan = None
+    a.requested_at = None
+    _audit(db, admin, "account_free_month", None, f"{a.email}: {plan}, free until {a.paid_until}")
+    issued = [licence_issuer.issue_if_paid(db, s, a) for s in db.query(Shop).filter(Shop.account_id == a.id).all()]
+    db.commit()
+    names = {"MONTHLY": "Monthly", "HALF_YEARLY": "Half-yearly", "YEARLY": "Yearly"}
+    until = date_label(a.paid_until)
+    mailer.send(a.email, "Your Curavo account is active - first month free",
+                f"Hello{(' ' + a.name) if a.name else ''},\n\n"
+                f"Your Curavo account{(' for ' + a.shop_name) if a.shop_name else ''} is now active. "
+                f"Your first month is free, until {until}.\n\n"
+                f"Download Curavo for Windows from your account:\n{settings.site_url}/account#download\n\n"
+                f"After installing, choose 'Sign in with your Curavo account' on the PC and use this email address.\n\n"
+                f"Your plan: {names[plan]}. Our team will contact you before {until} to complete the payment.\n\n"
+                f"- Curavo, by ARZ Solutions")
+    return {**_account_row(db, a), "keys_sent": sum(1 for k in issued if k is not None),
+            "issuing_enabled": licence_issuer.enabled()}
+
+
+def date_label(ymd: str) -> str:
+    from datetime import date
+    d = date.fromisoformat(ymd)
+    return f"{d.day} {d.strftime('%b %Y')}"

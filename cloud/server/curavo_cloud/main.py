@@ -49,6 +49,8 @@ _ADDED_COLUMNS = [
     ("shops", "account_id", "INTEGER"),          # the owner's Curavo account
     ("accounts", "requested_plan", "VARCHAR(20)"),
     ("accounts", "requested_at", "DATETIME"),
+    ("accounts", "free_month_used", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("accounts", "on_free_month", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 

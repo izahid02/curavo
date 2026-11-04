@@ -182,6 +182,9 @@ fieldset.bare { border: 0; padding: 0; margin: 0; }
 .tile em { font-style: normal; font-size: 13.5px; color: var(--ink-2); }
 .next h2 { margin-bottom: 6px; }
 .next .btn { margin-top: 14px; }
+.pill.neutral { background: rgba(30,27,75,0.07); color: var(--ink-2); }
+.free-line { color: var(--mint); font-size: 13.5px; font-weight: 600; margin-top: 4px; }
+.free-box { background: var(--mint-soft); color: #065f46; border-radius: 12px; padding: 10px 12px; margin-bottom: 14px; display: flex; flex-direction: column; font-size: 14px; }
 .pill.bad { background: var(--danger-soft); color: var(--danger); }
 .meter { height: 8px; border-radius: 99px; background: rgba(30,27,75,0.08); overflow: hidden; margin: 14px 0 8px; }
 .meter i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #6366f1, #8b5cf6); }
@@ -225,7 +228,6 @@ fieldset.bare { border: 0; padding: 0; margin: 0; }
 const SITE = {
   api: 'https://cloud.curavo.in',            // the Curavo cloud
   google_client_id: '981276880805-iqp9a9mc4v2q9h8ruhpric21cest34uh.apps.googleusercontent.com',                     // "Sign in with Google" client id (Google Cloud console); '' = button hidden
-  download: 'https://cloud.curavo.in/download/windows',
   whatsapp: '+91 69014 74078',              // shown for "pay by UPI" until online payments exist
   prices: [['MONTHLY', 'Monthly', '₹589', 'about ₹20 a day'], ['HALF_YEARLY', 'Half-yearly', '₹2,899', 'about ₹16 a day'], ['YEARLY', 'Yearly', '₹4,999', 'about ₹14 a day']],
 };
@@ -355,7 +357,7 @@ function signUpScreen() {
   app.innerHTML = `
   <div class="narrow"><div class="card">
     <h1>Create your Curavo account</h1>
-    <p class="sub">${planOf(load(PLAN_KEY)) ? `Next: your shop details and the ${esc(planOf(load(PLAN_KEY))[1])} plan. ` : ''}For the shop owner; your staff keep their own logins on the shop PC.</p>
+    <p class="sub">${planOf(load(PLAN_KEY)) ? `Next: your shop details and the ${esc(planOf(load(PLAN_KEY))[1])} plan, first month free. ` : ''}For the shop owner; your staff keep their own logins on the shop PC.</p>
     <div id="gbtn"></div>
     <div class="or">or with email</div>
     <form novalidate>
@@ -514,24 +516,6 @@ function fmtWhen(iso) { return iso ? new Date(iso).toLocaleDateString('en-IN', {
 function daysUntil(ymd) { return Math.round((new Date(ymd + 'T00:00:00') - new Date(todayYmd() + 'T00:00:00')) / 86400000); }
 const PLAN_MONTHS = { MONTHLY: 1, HALF_YEARLY: 6, YEARLY: 12, FOUNDING: 12 };
 
-// One place that decides what state the subscription is in.
-function subState(me) {
-  const s = me.subscription || {};
-  const active = !!(s.paid_until && s.paid_until >= todayYmd());
-  return {
-    active, ended: !!(s.paid_until && !active), plan: s.plan, until: s.paid_until,
-    left: active ? daysUntil(s.paid_until) : 0,
-    request: s.requested_plan && planOf(s.requested_plan) ? s.requested_plan : null, requestedAt: s.requested_at,
-  };
-}
-function statusPill(st) {
-  if (st.active && st.left <= 15) return '<span class="pill warn">Renew soon</span>';
-  if (st.active) return '<span class="pill ok">Active</span>';
-  if (st.request) return '<span class="pill info">Waiting for payment</span>';
-  if (st.ended) return '<span class="pill bad">Ended</span>';
-  return '<span class="pill warn">Free trial</span>';
-}
-
 async function accountScreen() {
   if (!token) { (load(PLAN_KEY) ? signUpScreen : signInScreen)(); return; }
   app.innerHTML = `<div class="card"><h1>Loading…</h1></div>`;
@@ -572,30 +556,69 @@ function dashboard(view) {
 function goView(v) { history.replaceState({}, '', location.pathname + location.search + '#' + v); dashboard(v); window.scrollTo(0, 0); }
 function subscriptionCard(me, flow) { if (flow) return checkoutPage(me, flow); dashboard(); }   // used by the plan steps
 
+// One place that decides what state the subscription is in.
+function subState(me) {
+  const s = me.subscription || {};
+  const active = !!(s.paid_until && s.paid_until >= todayYmd());
+  return {
+    active, free: active && !!s.free_month, freeAvailable: s.free_month_available !== false,
+    ended: !!(s.paid_until && !active), plan: s.plan, until: s.paid_until,
+    left: active ? daysUntil(s.paid_until) : 0,
+    request: s.requested_plan && planOf(s.requested_plan) ? s.requested_plan : null, requestedAt: s.requested_at,
+  };
+}
+function statusPill(st) {
+  if (st.free) return '<span class="pill info">Free month</span>';
+  if (st.active && st.left <= 15) return '<span class="pill warn">Renew soon</span>';
+  if (st.active) return '<span class="pill ok">Active</span>';
+  if (st.request) return '<span class="pill warn">Waiting for activation</span>';
+  if (st.ended) return '<span class="pill bad">Ended</span>';
+  return '<span class="pill neutral">Not active</span>';
+}
+// The steps after "Confirm request", for the timeline.
+function requestSteps(me, st) {
+  const phone = esc(me.shop.phone || 'your phone');
+  return st.freeAvailable && !st.active
+    ? [['Plan chosen', 'We have your request and shop details.'],
+       ['Our team calls you', `On ${phone}, usually within one working day.`],
+       ['Account activated, first month free', 'The download appears here. Install Curavo and sign in on your shop PC.'],
+       ['Pay for your plan', 'Before the free month ends, by UPI. No card or bank details are taken online.']]
+    : [['Plan chosen', 'We have your request.'],
+       ['Our team calls you', `On ${phone}, usually within one working day.`],
+       ['Payment by UPI', 'Pay on the call. No card or bank details are taken online.'],
+       ['Subscription extended', 'It reaches your shop PC by itself. Nothing to type.']];
+}
+
 // ---- Overview
 function viewOverview(el, me, st, first) {
   const pcs = me.pcs || [];
   let next;
   if (st.request) {
     next = `<h2>Next: our team calls you</h2>
-      <p class="muted">You chose <b>${esc(planName(st.request))}</b> (${esc(planOf(st.request)[2])}). We call ${esc(me.shop.phone || 'you')} to complete the payment by UPI; your subscription then switches on by itself.</p>
+      <p class="muted">You chose <b>${esc(planName(st.request))}</b> (${esc(planOf(st.request)[2])}). We call ${esc(me.shop.phone || 'you')} ${st.active ? 'to complete the payment' : 'to activate your account; your first month is free'}.</p>
       <button class="btn btn-ghost" data-go-view="subscription">See the request</button>`;
   } else if (!st.active) {
-    next = `<h2>${st.ended ? 'Renew your subscription' : 'Choose a plan'}</h2>
-      <p class="muted">${st.ended ? 'Your subscription has ended. Billing keeps working; reports, backups download and the owner app are paused until you renew.' : 'Pick the plan that suits your shop. Once it is active, Curavo is ready to download.'}</p>
-      <button class="btn btn-primary" data-start="${esc(st.plan && planOf(st.plan) ? st.plan : 'YEARLY')}">${st.ended ? 'Renew now' : 'Choose a plan'}</button>`;
+    next = st.ended
+      ? `<h2>Renew your subscription</h2>
+         <p class="muted">Your subscription has ended. Billing keeps working; reports, backup downloads and the owner app are paused until you renew.</p>
+         <button class="btn btn-primary" data-start="${esc(planOf(st.plan) ? st.plan : 'YEARLY')}">Renew now</button>`
+      : `<h2>Choose a plan to get started</h2>
+         <p class="muted">Every plan starts with <b>one month free</b>. Our team calls you to activate your account, then Curavo is ready to download. You pay only before the free month ends.</p>
+         <button class="btn btn-primary" data-start="YEARLY">Choose a plan</button>`;
   } else if (!pcs.length) {
     next = `<h2>Next: install Curavo on your shop PC</h2>
       <p class="muted">Download it, install it, then choose <b>Sign in with your Curavo account</b> on the PC. Your subscription reaches it by itself.</p>
       <button class="btn btn-primary" data-go-view="download">Go to Download</button>`;
+  } else if (st.free) {
+    next = `<h2>Enjoy your free month</h2><p class="muted">It runs until ${fmtDate(st.until)}. Our team contacts you before then to complete the ${esc(planName(st.plan))} payment (${esc((planOf(st.plan) || [])[2] || '')}).</p>`;
   } else {
     next = `<h2>All set</h2><p class="muted">Your subscription reaches ${pcs.length === 1 ? 'your shop PC' : 'your ' + pcs.length + ' shop PCs'} by itself. Nothing to copy or type.</p>`;
   }
   el.innerHTML = `
     <div class="page-head"><div><h1>Welcome${first ? ', ' + esc(first) : ''}</h1><p class="sub" style="margin:0">${esc(me.shop.name || 'Your Curavo account')}${me.shop.town ? ' · ' + esc(me.shop.town) : ''}</p></div></div>
     <div class="tiles">
-      <div class="tile"><span>Plan</span><b>${st.active ? esc(planName(st.plan)) : st.request ? esc(planName(st.request)) : 'Free trial'}</b>${statusPill(st)}</div>
-      <div class="tile"><span>${st.active ? 'Renews on' : 'Subscription'}</span><b>${st.active ? fmtDate(st.until) : st.ended ? 'Ended ' + fmtDate(st.until) : 'Not started'}</b><em>${st.active ? st.left + ' days left' : st.request ? 'Payment pending' : '30 days free from installing'}</em></div>
+      <div class="tile"><span>Plan</span><b>${st.active ? esc(planName(st.plan)) : st.request ? esc(planName(st.request)) : 'None yet'}</b>${statusPill(st)}</div>
+      <div class="tile"><span>${st.free ? 'Free until' : st.active ? 'Renews on' : 'Subscription'}</span><b>${st.active ? fmtDate(st.until) : st.ended ? 'Ended ' + fmtDate(st.until) : 'Not started'}</b><em>${st.active ? st.left + ' days left' : st.request ? 'Waiting for activation' : 'First month free'}</em></div>
       <div class="tile"><span>Shop PCs</span><b>${pcs.length}</b><em>${pcs.length ? 'Last online ' + ago(pcs[0].last_seen_at) : 'None linked yet'}</em></div>
     </div>
     <section class="card next">${next}</section>`;
@@ -608,38 +631,47 @@ function wireDashButtons(el, me) {
 
 // ---- Subscription
 function viewSubscription(el, me, st) {
+  const planBtn = planOf(st.plan) ? st.plan : 'YEARLY';
   let current;
-  if (st.active) {
+  if (st.free) {
+    const pct = Math.max(3, Math.min(100, Math.round(st.left / 30.4 * 100)));
+    current = `<div class="status-head">${statusPill(st)}<span class="muted">${esc(planName(st.plan))} plan</span></div>
+      <p class="lead">Free until <b>${fmtDate(st.until)}</b></p>
+      <div class="meter" role="img" aria-label="${st.left} days left"><i style="width:${pct}%"></i></div>
+      <p class="muted">${st.left} days left. After that: <b>${esc(planName(st.plan))}, ${esc((planOf(st.plan) || [])[2] || '')}</b> (GST included). Our team contacts you before ${fmtDate(st.until)} to complete the payment by UPI; the plan's time starts after the free month.</p>
+      ${st.request ? '' : `<div class="btn-row"><button class="btn btn-ghost" data-start="${esc(planBtn)}">Change plan</button></div>`}`;
+  } else if (st.active) {
     const months = PLAN_MONTHS[st.plan] || 12;
     const pct = Math.max(3, Math.min(100, Math.round(st.left / (months * 30.4) * 100)));
     current = `<div class="status-head">${statusPill(st)}<span class="muted">${esc(planName(st.plan))} plan</span></div>
       <p class="lead">Paid until <b>${fmtDate(st.until)}</b></p>
       <div class="meter" role="img" aria-label="${st.left} days left"><i style="width:${pct}%"></i></div>
       <p class="muted">${st.left} days left. Renewing early adds to the end date, so no days are lost.</p>
-      ${st.request ? '' : `<div class="btn-row"><button class="btn btn-primary" data-start="${esc(planOf(st.plan) ? st.plan : 'YEARLY')}">Renew</button><button class="btn btn-ghost" data-start="${esc(planOf(st.plan) ? st.plan : 'YEARLY')}" data-change>Change plan</button></div>`}`;
+      ${st.request ? '' : `<div class="btn-row"><button class="btn btn-primary" data-start="${esc(planBtn)}">Renew</button><button class="btn btn-ghost" data-start="${esc(planBtn)}">Change plan</button></div>`}`;
   } else if (st.ended) {
     current = `<div class="status-head">${statusPill(st)}<span class="muted">${esc(planName(st.plan))} plan</span></div>
       <p class="lead">Ended on <b>${fmtDate(st.until)}</b></p>
       <p class="muted">Billing keeps working. Reports, backup downloads and the owner app are paused until you renew.</p>
-      ${st.request ? '' : `<div class="btn-row"><button class="btn btn-primary" data-start="${esc(planOf(st.plan) ? st.plan : 'YEARLY')}">Renew now</button></div>`}`;
+      ${st.request ? '' : `<div class="btn-row"><button class="btn btn-primary" data-start="${esc(planBtn)}">Renew now</button></div>`}`;
   } else {
-    current = `<div class="status-head"><span class="pill warn">Free trial</span></div>
-      <p class="lead">30 days free from installing Curavo</p>
-      <p class="muted">Choose a plan below to keep Curavo after the trial.</p>`;
+    current = st.request
+      ? `<div class="status-head">${statusPill(st)}</div>
+         <p class="lead">Your account is not active yet</p>
+         <p class="muted">We have your request, see the steps below. The download unlocks as soon as our team activates your account.</p>`
+      : `<div class="status-head">${statusPill(st)}</div>
+         <p class="lead">Every plan starts with one month free</p>
+         <p class="muted">Choose a plan below. Our team calls you to activate your account; you pay only before the free month ends.</p>`;
   }
+  const steps = st.request ? requestSteps(me, st) : [];
   const pending = st.request ? `
     <section class="card">
       <div class="top-right"><h2 style="margin:0">Request received</h2><span class="muted">${esc(fmtWhen(st.requestedAt))}</span></div>
-      <p class="lead"><b>${esc(planName(st.request))} plan</b> · ${esc(planOf(st.request)[2])} <span class="muted">GST included</span></p>
-      <ol class="timeline">
-        <li class="done"><b>Plan chosen</b><span>We have your request and shop details.</span></li>
-        <li class="now"><b>Our team calls you</b><span>On ${esc(me.shop.phone || 'your phone')}, usually within one working day.</span></li>
-        <li><b>Payment by UPI</b><span>Pay on the call. No card or bank details are taken online.</span></li>
-        <li><b>Subscription ${st.active ? 'extended' : 'switches on'}</b><span>It reaches your shop PC by itself. Nothing to type.</span></li>
-      </ol>
+      <p class="lead"><b>${esc(planName(st.request))} plan</b> · ${esc(planOf(st.request)[2])} <span class="muted">GST included${st.freeAvailable && !st.active ? ' · first month free' : ''}</span></p>
+      <ol class="timeline">${steps.map(([b, t], i) => `<li class="${i === 0 ? 'done' : i === 1 ? 'now' : ''}"><b>${b}</b><span>${t}</span></li>`).join('')}</ol>
       <div class="msg"></div>
       <div class="text-links"><a href="#" id="pchange">Change plan</a><a href="#" id="pcancel">Cancel request</a></div>
     </section>` : '';
+  const freeTag = st.freeAvailable && !st.active;
   el.innerHTML = `
     <div class="page-head"><div><h1>Subscription</h1><p class="sub" style="margin:0">One plan, every feature. Prices include 18% GST.</p></div></div>
     <section class="card">${current}</section>
@@ -648,8 +680,10 @@ function viewSubscription(el, me, st) {
       <h2>Plans</h2>
       <div class="plan-grid">${SITE.prices.map(([c, n, p, d]) => `<div class="plan-col${c === 'YEARLY' ? ' best' : ''}">
         ${c === 'YEARLY' ? '<span class="tag">Best value</span>' : ''}<span class="pn">${n}</span><b>${p}</b><span class="muted">${d}</span>
+        ${freeTag ? '<span class="free-line">+ first month free</span>' : ''}
         ${st.request === c ? '<span class="pill info" style="margin-top:12px;align-self:flex-start">Requested</span>'
-          : (st.active && st.plan === c) ? `<button class="btn btn-ghost" data-start="${c}">Renew</button>`
+          : (st.active && st.plan === c && !st.free) ? `<button class="btn btn-ghost" data-start="${c}">Renew</button>`
+          : (st.free && st.plan === c) ? '<span class="pill info" style="margin-top:12px;align-self:flex-start">Your plan</span>'
           : `<button class="btn ${c === 'YEARLY' ? 'btn-primary' : 'btn-ghost'}" data-start="${c}">Choose</button>`}
       </div>`).join('')}</div>
     </section>`;
@@ -671,7 +705,7 @@ function viewSubscription(el, me, st) {
   }
 }
 
-// ---- Download (only once the subscription is active)
+// ---- Download (only once the account is activated: free month or paid)
 function viewDownload(el, me, st) {
   const pcs = me.pcs || [];
   if (!st.active) {
@@ -679,8 +713,10 @@ function viewDownload(el, me, st) {
       <div class="page-head"><div><h1>Download</h1></div></div>
       <section class="card locked">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-        <h2>Available once your subscription is active</h2>
-        <p class="muted">${st.request ? 'We have your request. As soon as the payment is done, the download appears here.' : 'Choose a plan; once it is paid, Curavo for Windows is ready here.'}</p>
+        <h2>Available once your account is activated</h2>
+        <p class="muted">${st.request ? 'We have your request. Our team calls you to activate your account; the download then appears here.'
+          : st.ended ? 'Your subscription has ended. Renew it to download Curavo again.'
+          : 'Choose a plan (the first month is free). Once our team activates your account, Curavo for Windows is ready here.'}</p>
         ${st.request ? '<button class="btn btn-ghost" data-go-view="subscription">See the request</button>' : '<button class="btn btn-primary" data-go-view="subscription">Choose a plan</button>'}
       </section>`;
     wireDashButtons(el, me);
@@ -690,7 +726,8 @@ function viewDownload(el, me, st) {
     <div class="page-head"><div><h1>Download</h1><p class="sub" style="margin:0">Curavo for Windows 10 and 11</p></div></div>
     <section class="card">
       <div class="dl"><div><h2 style="margin:0">Curavo for Windows</h2><p class="muted" style="margin:4px 0 0">One installer. Updates arrive by themselves after that.</p></div>
-        <a class="btn btn-primary" href="${esc(SITE.download)}">Download</a></div>
+        <button class="btn btn-primary" id="dlbtn">Download</button></div>
+      <div class="msg" style="margin-top:12px"></div>
       <ol class="how">
         <li><b>Install</b><span>Open the downloaded file and follow the steps.</span></li>
         <li><b>Sign in</b><span>On the PC, choose <b>Sign in with your Curavo account</b> and use ${esc(me.email)}.</span></li>
@@ -703,6 +740,17 @@ function viewDownload(el, me, st) {
         <span class="muted" style="text-align:right">Online ${ago(p.last_seen_at)}</span></div>`).join('')
         : '<p class="muted">None yet. They appear here once you sign in on the PC.</p>'}
     </section>`;
+  // The installer link is made for this account on the spot and works for 15 minutes.
+  const btn = el.querySelector('#dlbtn');
+  btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Preparing…';
+    try {
+      const r = await api('/account/v1/download');
+      location.href = SITE.api + r.url;
+      el.querySelector('.msg').innerHTML = note('ok', 'Your download is starting. If nothing happens, press Download again.');
+    } catch (err) { el.querySelector('.msg').innerHTML = note('err', err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Download'; }
+  };
 }
 
 // ---- Shop details
@@ -751,6 +799,7 @@ function viewSecurity(el, me) {
 // on the right, nothing else to distract.  Leaving it reloads My account.
 function checkoutPage(me, flow) {
   const [, n, price, perDay] = planOf(flow.plan) || planOf('YEARLY');
+  const firstFree = (me.subscription || {}).free_month_available !== false && !subState(me).active;
   app.innerHTML = `
   <a href="/account" class="back-link" id="toacct">← My account</a>
   <div class="checkout">
@@ -758,7 +807,8 @@ function checkoutPage(me, flow) {
     <aside class="card order" aria-label="Your order">
       <h2>Your order</h2>
       <div class="kv"><span>Curavo ${esc(n)}</span><b>${esc(price)}</b></div>
-      <p class="muted" style="margin:2px 0 14px">${esc(perDay)} · GST included</p>
+      <p class="muted" style="margin:2px 0 ${firstFree ? '10' : '14'}px">${esc(perDay)} · GST included</p>
+      ${firstFree ? '<div class="free-box"><b>First month free</b><span>You pay only before it ends.</span></div>' : ''}
       <ul class="ticks">
         <li>Billing, stock, expiry and patients</li>
         <li>Daily cloud backup</li>
@@ -766,7 +816,7 @@ function checkoutPage(me, flow) {
         <li>Automatic updates</li>
         <li>Support on WhatsApp</li>
       </ul>
-      <p class="muted order-foot">Nothing is charged online. Our team calls you to complete the payment by UPI.</p>
+      <p class="muted order-foot">${firstFree ? 'Nothing to pay now. Our team calls you to activate your account.' : 'Nothing is charged online. Our team calls you to complete the payment by UPI.'}</p>
     </aside>
   </div>`;
   document.getElementById('toacct').onclick = (e) => { e.preventDefault(); dashboard(); window.scrollTo(0, 0); };
@@ -787,7 +837,7 @@ function checkoutSteps(card, me, flow) {
       <form novalidate><fieldset class="bare"><legend class="sr-only">Plan</legend>
       <div class="plans">${SITE.prices.map(([c, n, p, d]) => `<label class="plan"><input type="radio" name="plan" value="${c}"${c === flow.plan ? ' checked' : ''}>
         <span class="plan-name"><span class="radio" aria-hidden="true"></span><span>${n}<br><span class="muted">${d}</span></span></span><b>${p}</b></label>`).join('')}</div></fieldset>
-      <p class="muted" style="margin-top:12px">GST included. All features in every plan.</p>
+      <p class="muted" style="margin-top:12px">GST included. All features in every plan${(me.subscription || {}).free_month_available !== false && !subState(me).active ? ', and the first month is free' : ''}.</p>
       <div class="btn-row">${back(0)}<button class="btn btn-primary" type="submit">Continue</button></div></form>`;
     wire();
     card.querySelectorAll('input[name=plan]').forEach((r) => r.addEventListener('change', () => {
@@ -815,6 +865,7 @@ function checkoutSteps(card, me, flow) {
     return;
   }
   const [, n, price] = planOf(flow.plan);
+  const firstFree = (me.subscription || {}).free_month_available !== false && !subState(me).active;
   const row = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
   card.innerHTML = `<h2 id="h-sub">Confirm your request</h2>${steps}
     <div class="summary">
@@ -822,9 +873,10 @@ function checkoutSteps(card, me, flow) {
       ${row('Price', `${esc(price)} <span class="muted">GST included</span>`)}
       ${row('Shop', esc(me.shop.name) + (me.shop.town ? `, ${esc(me.shop.town)}` : ''))}
       ${row('Phone', esc(me.shop.phone))}
-      ${row('Payment', 'By UPI, when our team calls you')}
+      ${firstFree ? row('First month', '<span style="color:var(--mint)">Free</span>') : ''}
+      ${row('Payment', firstFree ? 'By UPI, before the free month ends' : 'By UPI, when our team calls you')}
     </div>
-    <p class="muted">Your free trial keeps running until the payment is done.</p>
+    <p class="muted">${firstFree ? 'Nothing to pay now. Our team calls you to activate your account; the download then appears in your account.' : 'Our team calls you to complete the payment.'}</p>
     <form novalidate><div class="msg"></div>
       <div class="btn-row">${back(2)}<button class="btn btn-primary" type="submit">Confirm request</button></div></form>`;
   wire();

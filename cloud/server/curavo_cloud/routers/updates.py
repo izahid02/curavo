@@ -108,7 +108,12 @@ def get_installer(filename: str):
 
 
 @router.get("/download/windows")
-def download_latest(db: Session = Depends(get_db)):
+def download_latest(t: str = "", db: Session = Depends(get_db)):
+    """The website's Download button.  Needs the 15-minute link My account
+    hands an ACTIVE account (curavo_cloud/routers/accounts.py: /account/v1/download)."""
+    from curavo_cloud.routers.accounts import download_token_ok
+    if not download_token_ok(t):
+        raise HTTPException(status_code=403, detail="Download Curavo from your account at curavo.in.")
     rel = _offer_for(db, None)
     if rel is None:
         raise HTTPException(status_code=404, detail="No release available yet.")

@@ -152,6 +152,8 @@ def _profile(acc: Account) -> dict:
             "shop": {"name": acc.shop_name or "", "phone": acc.phone or "", "town": acc.town or "",
                      "gstin": acc.gstin or ""},
             "subscription": {"plan": acc.plan, "paid_until": acc.paid_until,
+                             "free_month": bool(acc.on_free_month),
+                             "free_month_available": not acc.free_month_used,
                              "requested_plan": acc.requested_plan,
                              "requested_at": acc.requested_at.isoformat() + "Z" if acc.requested_at else None}}
 
@@ -399,10 +401,13 @@ def request_plan(body: PlanRequestIn, acc: Account = Depends(current_account), d
     db.commit()
     if not repeat:                       # pressing it twice sends no second round of emails
         name, price = PLAN_NAMES[body.plan]
+        first = not acc.free_month_used      # a new shop: activation starts the free month
         if settings.sales_email:
+            todo = ("NEW SHOP - call them, then press 'Activate - start free month' in Curavo Control > Accounts. "
+                    "Collect the plan's price before the free month ends."
+                    if first else "Please call them to collect the payment, then save the subscription in Curavo Control > Accounts.")
             mailer.send(settings.sales_email, f"Curavo plan request: {name} - {acc.shop_name}",
-                        f"A shop chose a plan on curavo.in. Please call them to collect the payment, "
-                        f"then switch it on in Curavo Control > Accounts.\n\n"
+                        f"A shop chose a plan on curavo.in. {todo}\n\n"
                         f"Plan:   {name} ({price}, GST included)\n"
                         f"Shop:   {acc.shop_name}{(', ' + acc.town) if acc.town else ''}\n"
                         f"Phone:  {acc.phone}\n"
@@ -412,9 +417,12 @@ def request_plan(body: PlanRequestIn, acc: Account = Depends(current_account), d
         mailer.send(acc.email, f"We got your request for Curavo {name}",
                     f"Hello{(' ' + acc.name) if acc.name else ''},\n\n"
                     f"Thank you for choosing Curavo {name} ({price}, GST included) for {acc.shop_name}.\n\n"
-                    f"Our team will contact you soon on {acc.phone} to complete the payment. "
-                    f"As soon as it is done, your subscription is switched on and reaches your shop PC "
-                    f"by itself - nothing to copy or type.\n\n- Curavo, by ARZ Solutions")
+                    + (f"Our team will contact you soon on {acc.phone} to activate your account. Your first month "
+                       f"is free: you pay for the plan only before it ends. Once activated, the download appears "
+                       f"in your account.\n\n- Curavo, by ARZ Solutions" if first else
+                       f"Our team will contact you soon on {acc.phone} to complete the payment. "
+                       f"As soon as it is done, your subscription is extended and reaches your shop PC "
+                       f"by itself - nothing to copy or type.\n\n- Curavo, by ARZ Solutions"))
     return _profile(acc)
 
 
@@ -424,3 +432,33 @@ def cancel_plan_request(acc: Account = Depends(current_account), db: Session = D
     acc.requested_at = None
     db.commit()
     return _profile(acc)
+
+
+# --------------------------------------------------------------- download
+# The installer is offered only to an ACTIVE account (free month or paid).
+# My account asks for a link; it works for 15 minutes.
+
+DOWNLOAD_MINUTES = 15
+
+
+def subscription_active(acc: Account) -> bool:
+    from curavo_cloud.dates import today_ist
+    return bool(acc.paid_until and acc.paid_until >= today_ist().isoformat())
+
+
+def download_token_ok(t: str) -> bool:
+    try:
+        jwt.decode(t or "", settings.account_secret, algorithms=["HS256"], audience="curavo-download")
+        return True
+    except JWTError:
+        return False
+
+
+@router.get("/download")
+def download_link(acc: Account = Depends(current_account)):
+    if not subscription_active(acc):
+        raise HTTPException(status_code=403, detail="The download is available once your account is activated.")
+    t = jwt.encode({"sub": str(acc.id), "aud": "curavo-download",
+                    "exp": datetime.utcnow() + timedelta(minutes=DOWNLOAD_MINUTES)},
+                   settings.account_secret, algorithm="HS256")
+    return {"url": f"/download/windows?t={t}", "minutes": DOWNLOAD_MINUTES}

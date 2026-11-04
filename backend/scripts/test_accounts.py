@@ -238,8 +238,46 @@ with TestClient(app) as c:
     c.post("/account/v1/me/plan-request", headers=H, json={"plan": "HALF_YEARLY"})
     r = c.patch(f"/admin/api/accounts/{row['id']}", headers=A, json={"plan": "HALF_YEARLY", "paid_until": "2027-05-04"})
     check("switching the plan on clears the request", (r.json()["requested_plan"], r.json()["paid_until"]), (None, "2027-05-04"))
-    check("...and the owner sees it active", me(gtok).json()["subscription"], 
-          {"plan": "HALF_YEARLY", "paid_until": "2027-05-04", "requested_plan": None, "requested_at": None})
+    sub = me(gtok).json()["subscription"]
+    check("...and the owner sees it active", (sub["plan"], sub["paid_until"], sub["requested_plan"], sub["free_month"]),
+          ("HALF_YEARLY", "2027-05-04", None, False))
+
+    print("[9] First month free; the download only for an active account")
+    from curavo_cloud.dates import add_months, today_ist
+    r = post("/signup", {"email": "newshop@example.com", "password": "medicine-123", "name": "Anwar"})
+    c.post("/account/v1/verify", json={"token": last_link("verify")})
+    t3 = post("/login", {"email": "newshop@example.com", "password": "medicine-123"}).json()["token"]
+    H3 = {"Authorization": f"Bearer {t3}"}
+    check("not active -> no download link", c.get("/account/v1/download", headers=H3).status_code, 403)
+    check("the public download needs a link", c.get("/download/windows", follow_redirects=False).status_code, 403)
+    acc3 = [a for a in c.get("/admin/api/accounts", headers=A).json() if a["email"] == "newshop@example.com"][0]
+    check("no plan chosen -> cannot activate", c.post(f"/admin/api/accounts/{acc3['id']}/start-free-month", headers=A).status_code, 400)
+    c.patch("/account/v1/me", headers=H3, json={"shop_name": "Anwar Medicos", "phone": "9435000000"})
+    n = len(OUTBOX)
+    c.post("/account/v1/me/plan-request", headers=H3, json={"plan": "YEARLY"})
+    check("a new shop's request mentions the free month",
+          any(m["to"] == "newshop@example.com" and "first month is free" in m["body"] for m in OUTBOX[n:]), True)
+    n = len(OUTBOX)
+    r = c.post(f"/admin/api/accounts/{acc3['id']}/start-free-month", headers=A)
+    free_until = add_months(today_ist(), 1).isoformat()
+    check("activate -> one free month on the chosen plan",
+          (r.status_code, r.json()["plan"], r.json()["paid_until"], r.json()["on_free_month"], r.json()["requested_plan"]),
+          (200, "YEARLY", free_until, True, None))
+    check("...the owner is told, with the download address",
+          any(m["to"] == "newshop@example.com" and "/account#download" in m["body"] for m in OUTBOX[n:]), True)
+    sub = me(t3).json()["subscription"]
+    check("...and sees 'free month'", (sub["free_month"], sub["free_month_available"]), (True, False))
+    check("only once per account", c.post(f"/admin/api/accounts/{acc3['id']}/start-free-month", headers=A).status_code, 400)
+    r = c.get("/account/v1/download", headers=H3)
+    check("active -> a download link", (r.status_code, r.json()["url"].startswith("/download/windows?t=")), (200, True))
+    check("...that the public download accepts (404 = no installer uploaded in this test)",
+          c.get(r.json()["url"], follow_redirects=False).status_code, 404)
+    check("a link made with another secret is refused",
+          c.get("/download/windows?t=" + jwt.encode({"aud": "curavo-download", "exp": datetime.utcnow() + timedelta(minutes=5)},
+                                                   "wrong-secret", algorithm="HS256"), follow_redirects=False).status_code, 403)
+    paid_to = add_months(add_months(today_ist(), 1), 12).isoformat()
+    r = c.patch(f"/admin/api/accounts/{acc3['id']}", headers=A, json={"plan": "YEARLY", "paid_until": paid_to})
+    check("payment saved -> the free month is over, paid to the new date", (r.json()["on_free_month"], r.json()["paid_until"]), (False, paid_to))
 
 shutil.rmtree(sandbox, ignore_errors=True)
 print("\n" + "=" * 58)
