@@ -41,7 +41,9 @@ export async function download(path) {
   const a = document.createElement('a');
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  // Revoking at once can cancel the download before the browser has started
+  // it (seen in Chrome, Nov 2026) - give it a minute.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 /** Send a form with files (the release upload). */
