@@ -64,6 +64,7 @@ label { display: block; font-size: 14px; font-weight: 500; color: var(--ink-2); 
 input { width: 100%; font: 400 16px/1.3 var(--font); color: var(--ink); background: #fff; border: 1px solid rgba(30,27,75,0.16); border-radius: 12px; padding: 12px 14px; }
 input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,0.18); }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: 600 15px/1 var(--font); padding: 13px 20px; border-radius: 12px; border: 1px solid transparent; cursor: pointer; text-decoration: none; }
+.btn { white-space: nowrap; }
 .btn[disabled] { opacity: .55; cursor: default; }
 .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 20px rgba(79,70,229,0.25); }
 .btn-ghost { background: #fff; color: var(--ink); border-color: rgba(30,27,75,0.14); }
@@ -103,6 +104,46 @@ label.plan:has(input:checked) .radio { border: 5px solid var(--accent); }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .top-right { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 #gbtn { min-height: 44px; display: flex; justify-content: center; }
+.btn-sm { padding: 8px 14px; font-size: 14px; }
+.pill.info { background: var(--accent-soft); color: #3730a3; }
+.status-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lead { font-size: 18px; margin: 12px 0 4px; }
+.timeline { list-style: none; margin: 18px 0 0; padding: 0; }
+.timeline li { position: relative; padding: 0 0 18px 34px; display: flex; flex-direction: column; }
+.timeline li span { color: var(--ink-2); font-size: 14px; }
+.timeline li b { font-weight: 600; }
+.timeline li::before { content: ""; position: absolute; left: 0; top: 2px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(30,27,75,0.18); background: #fff; box-sizing: border-box; }
+.timeline li::after { content: ""; position: absolute; left: 9px; top: 24px; bottom: 2px; width: 2px; background: rgba(30,27,75,0.10); }
+.timeline li:last-child { padding-bottom: 0; }
+.timeline li:last-child::after { display: none; }
+.timeline li.done::before { background: var(--mint); border-color: var(--mint); }
+.timeline li.done::after { background: var(--mint); }
+.timeline li.done b::after { content: " ✓"; color: var(--mint); }
+.timeline li.now::before { border: 6px solid var(--accent); }
+.timeline li:not(.done):not(.now) b { color: var(--ink-2); }
+.text-links { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14.5px; }
+.text-links a { text-decoration: none; font-weight: 500; }
+.danger-link { color: var(--danger) !important; }
+.plan-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+@media (max-width: 480px) { .plan-strip { grid-template-columns: 1fr; } }
+.plan-chip { font: inherit; text-align: left; display: flex; flex-direction: column; gap: 2px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; color: var(--ink); transition: border-color .15s, box-shadow .15s; }
+.plan-chip span { font-size: 14px; color: var(--ink-2); }
+.plan-chip b { font-size: 18px; }
+.plan-chip:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.steps { list-style: none; display: flex; gap: 6px; margin: 4px 0 18px; padding: 0; font-size: 13.5px; color: var(--hint); flex-wrap: wrap; }
+.steps li { display: flex; align-items: center; gap: 6px; }
+.steps li:not(:last-child)::after { content: ""; width: 22px; height: 1px; background: var(--line); margin-left: 4px; }
+.steps li span { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(30,27,75,0.16); font-size: 12px; font-weight: 600; background: #fff; }
+.steps li.now { color: var(--ink); font-weight: 600; }
+.steps li.now span { background: var(--accent); border-color: var(--accent); color: #fff; }
+.steps li.done span { background: var(--mint-soft); border-color: transparent; color: #065f46; }
+.summary { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 4px 16px; margin-bottom: 12px; }
+.kv { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.kv:first-child { border-top: 0; }
+.kv span { color: var(--ink-2); }
+.kv b { font-weight: 600; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+fieldset.bare { border: 0; padding: 0; margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -128,6 +169,7 @@ const SITE = {
 const app = document.getElementById('app');
 const TOKEN_KEY = 'curavo_session';
 const AFTER_KEY = 'curavo_after_signin';
+const PLAN_KEY = 'curavo_chosen_plan';   // a plan picked on the home page before signing in
 function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
 function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 let token = load(TOKEN_KEY);
@@ -224,7 +266,7 @@ function signInScreen(message) {
   app.innerHTML = `
   <div class="narrow"><div class="card">
     <h1>Sign in to Curavo</h1>
-    <p class="sub">${load(AFTER_KEY)?.startsWith('/link') ? 'Sign in to connect your shop PC.' : 'Your shop, subscription and download.'}</p>
+    <p class="sub">${load(AFTER_KEY)?.startsWith('/link') ? 'Sign in to connect your shop PC.' : planOf(load(PLAN_KEY)) ? `Sign in to continue with the ${esc(planOf(load(PLAN_KEY))[1])} plan.` : 'Your shop, subscription and download.'}</p>
     ${message || ''}
     <div id="gbtn"></div>
     <div class="or">or with email</div>
@@ -248,7 +290,7 @@ function signUpScreen() {
   app.innerHTML = `
   <div class="narrow"><div class="card">
     <h1>Create your Curavo account</h1>
-    <p class="sub">For the shop owner. Your staff keep their own logins on the shop PC.</p>
+    <p class="sub">${planOf(load(PLAN_KEY)) ? `Next: your shop details and the ${esc(planOf(load(PLAN_KEY))[1])} plan. ` : ''}For the shop owner; your staff keep their own logins on the shop PC.</p>
     <div id="gbtn"></div>
     <div class="or">or with email</div>
     <form novalidate>
@@ -388,13 +430,10 @@ async function linkScreen(code) {
 }
 
 async function accountScreen() {
-  if (!token) { signInScreen(); return; }
+  if (!token) { (load(PLAN_KEY) ? signUpScreen : signInScreen)(); return; }
   app.innerHTML = `<div class="card"><h1>Loading…</h1></div>`;
   let me;
   try { me = await api('/account/v1/me'); } catch (err) { if (err.status === 401) { signInScreen(); return; } app.innerHTML = note('err', err.message); return; }
-  const sub = me.subscription || {};
-  const today = new Date().toISOString().slice(0, 10);
-  const active = sub.paid_until && sub.paid_until >= today;
   const pcs = me.pcs || [];
   app.innerHTML = `
   <div class="top-right" style="margin-bottom:18px">
@@ -403,27 +442,8 @@ async function accountScreen() {
   </div>
   <div class="grid">
     <div style="display:grid;gap:18px">
-      <section class="card" aria-labelledby="h-sub">
-        <h2 id="h-sub">Subscription</h2>
-        ${active
-          ? `<p><span class="pill ok">Active</span> &nbsp;until <b>${fmtDate(sub.paid_until)}</b>${sub.plan ? ` · ${esc(planName(sub.plan))}` : ''}</p>
-             <p class="muted" style="margin-top:8px">Reaches your shop PC by itself. Nothing to copy or type.</p>`
-          : `<p><span class="pill warn">Free trial</span> &nbsp;30 days from installing Curavo on your shop PC.</p>`}
-        <div id="planbox"></div>
-      </section>
-      <section class="card" aria-labelledby="h-shop">
-        <h2 id="h-shop">Your shop</h2>
-        <form novalidate id="shopform"><div class="msg"></div>
-          <label for="sn">Shop name</label><input id="sn" name="shop_name" value="${esc(me.shop.name)}" autocomplete="organization">
-          <div class="two">
-            <div><label for="ph">Phone</label><input id="ph" name="phone" value="${esc(me.shop.phone)}" inputmode="tel" autocomplete="tel"></div>
-            <div><label for="tw">Town</label><input id="tw" name="town" value="${esc(me.shop.town)}"></div>
-          </div>
-          <label for="gs">GSTIN <span class="muted">(optional)</span></label><input id="gs" name="gstin" value="${esc(me.shop.gstin)}" maxlength="15" style="text-transform:uppercase">
-          <label for="yn">Your name</label><input id="yn" name="name" value="${esc(me.name)}" autocomplete="name">
-          <button class="btn btn-primary" type="submit" style="margin-top:18px">Save</button>
-        </form>
-      </section>
+      <section class="card" aria-labelledby="h-sub" id="subcard"></section>
+      <section class="card" aria-labelledby="h-shop" id="shopcard"></section>
     </div>
     <div style="display:grid;gap:18px">
       <section class="card" aria-labelledby="h-dl">
@@ -448,66 +468,177 @@ async function accountScreen() {
       </section>
     </div>
   </div>`;
-  planBox(me, active);
   document.getElementById('signout').onclick = () => { token = null; store(TOKEN_KEY, null); signInScreen(note('ok', 'Signed out.')); };
-  const shopForm = document.getElementById('shopform'), pwForm = document.getElementById('pwform');   // by id: the plan picker is a form too
-  onSubmit(shopForm, async (f) => {
-    Object.assign(me, await api('/account/v1/me', { method: 'PATCH', body: { shop_name: f.get('shop_name'), phone: f.get('phone'), town: f.get('town'), gstin: f.get('gstin'), name: f.get('name') } }));
-    shopForm.querySelector('.msg').innerHTML = note('ok', 'Saved.');
-    if (me.subscription.requested_plan) planBox(me, active);
-  });
+  const pwForm = document.getElementById('pwform');
   onSubmit(pwForm, async (f) => {
     const r = await api('/account/v1/me/password', { method: 'POST', body: { current: f.get('current') || '', new: f.get('new') } });
     token = r.token; store(TOKEN_KEY, r.token);
     pwForm.reset();
     pwForm.querySelector('.msg').innerHTML = note('ok', 'Password saved. Other devices were signed out.');
   });
+  // A plan chosen on the home page (before signing in) opens the steps straight away.
+  const wanted = load(PLAN_KEY);
+  store(PLAN_KEY, null);
+  const pick = SITE.prices.some((p) => p[0] === wanted) ? wanted : null;
+  subscriptionCard(me, pick ? { step: 1, plan: pick } : null);
+  shopCard(me);
 }
 
-// ------------------------------------------------------------ choose a plan
-// No online payment yet: the owner chooses, ARZ calls to collect the payment
-// and switches the plan on from Curavo Control.
-function planName(code) { return (SITE.prices.find((p) => p[0] === code) || [code, String(code).replace('_', '-').toLowerCase()])[1]; }
+// ------------------------------------------------------------ subscription
+// No online payment yet: the owner goes through three short steps (plan ->
+// shop details -> confirm), ARZ phones them, collects the payment and
+// switches the plan on from Curavo Control.
+function planOf(code) { return SITE.prices.find((p) => p[0] === code); }
+function planName(code) { return (planOf(code) || [code, String(code).replace('_', '-').toLowerCase()])[1]; }
+function todayYmd() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function fmtWhen(iso) { return iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''; }
 
-function planBox(me, active, picking = false) {
-  const box = document.getElementById('planbox');
-  if (!box) return;
+function subscriptionCard(me, flow) {
+  const card = document.getElementById('subcard');
   const sub = me.subscription || {};
-  const req = sub.requested_plan && SITE.prices.find((p) => p[0] === sub.requested_plan);
-  if (req && !picking) {
-    box.innerHTML = `<div class="note info" role="status" style="margin-top:14px">
-        <b>Request received: ${esc(req[1])} plan, ${esc(req[2])}.</b><br>
-        Our team will contact you soon${me.shop.phone ? ` on <b>${esc(me.shop.phone)}</b>` : ''} to complete the payment.
-        As soon as it is done, your subscription switches on and reaches your shop PC by itself.</div>
+  const active = sub.paid_until && sub.paid_until >= todayYmd();
+  const head = `<h2 id="h-sub">Subscription</h2>`;
+  if (flow) return checkoutSteps(card, me, flow);
+
+  if (sub.requested_plan && planOf(sub.requested_plan)) {          // waiting for ARZ
+    const [, n, price] = planOf(sub.requested_plan);
+    card.innerHTML = `${head}
+      <div class="status-head"><span class="pill info">Request received</span><span class="muted">${esc(fmtWhen(sub.requested_at))}</span></div>
+      <p class="lead"><b>${esc(n)} plan</b> · ${esc(price)} <span class="muted">GST included</span></p>
+      <ol class="timeline">
+        <li class="done"><b>Plan chosen</b><span>We have your request and shop details.</span></li>
+        <li class="now"><b>Our team calls you</b><span>On ${esc(me.shop.phone || 'your phone')}, usually within one working day.</span></li>
+        <li><b>Payment by UPI</b><span>Pay on the call. No card or bank details are taken online.</span></li>
+        <li><b>Subscription switches on</b><span>It reaches your shop PC by itself. Nothing to type.</span></li>
+      </ol>
       <div class="msg"></div>
-      <div class="btn-row"><button class="btn btn-ghost" id="pchange">Change plan</button><button class="btn btn-ghost" id="pcancel">Cancel request</button></div>`;
-    box.querySelector('#pchange').onclick = () => planBox(me, active, true);
-    box.querySelector('#pcancel').onclick = async (e) => {
-      e.target.disabled = true;
-      try { planBox(Object.assign(me, await api('/account/v1/me/plan-request', { method: 'DELETE' })), active); }
-      catch (err) { box.querySelector('.msg').innerHTML = note('err', err.message); e.target.disabled = false; }
+      <div class="text-links"><a href="#" id="pchange">Change plan</a><a href="#" id="pcancel">Cancel request</a></div>`;
+    card.querySelector('#pchange').onclick = (e) => { e.preventDefault(); subscriptionCard(me, { step: 1, plan: sub.requested_plan }); };
+    card.querySelector('#pcancel').onclick = (e) => {
+      e.preventDefault();
+      const links = card.querySelector('.text-links');
+      links.innerHTML = `<span class="muted">Cancel this request?</span><a href="#" id="pyes" class="danger-link">Yes, cancel</a><a href="#" id="pno">Keep it</a>`;
+      links.querySelector('#pno').onclick = (ev) => { ev.preventDefault(); subscriptionCard(me); };
+      links.querySelector('#pyes').onclick = async (ev) => {
+        ev.preventDefault();
+        try { Object.assign(me, await api('/account/v1/me/plan-request', { method: 'DELETE' })); subscriptionCard(me); }
+        catch (err) { card.querySelector('.msg').innerHTML = note('err', err.message); }
+      };
     };
     return;
   }
-  if (active && !picking) {
-    box.innerHTML = `<div class="btn-row"><button class="btn btn-ghost" id="prenew">Renew or change plan</button></div>`;
-    box.querySelector('#prenew').onclick = () => planBox(me, active, true);
+  if (active) {
+    card.innerHTML = `${head}
+      <div class="status-head"><span class="pill ok">Active</span>${sub.plan ? `<span class="muted">${esc(planName(sub.plan))} plan</span>` : ''}</div>
+      <p class="lead">Paid until <b>${fmtDate(sub.paid_until)}</b></p>
+      <p class="muted">Reaches your shop PC by itself. Nothing to copy or type.</p>
+      <button class="btn btn-ghost" id="prenew" style="margin-top:16px">Renew or change plan</button>`;
+    card.querySelector('#prenew').onclick = () => subscriptionCard(me, { step: 1, plan: sub.plan && planOf(sub.plan) ? sub.plan : 'YEARLY' });
     return;
   }
-  const chosen = sub.requested_plan || 'YEARLY';
-  box.innerHTML = `<form novalidate>
-      <fieldset style="border:0;padding:0;margin:0"><legend class="muted" style="margin-top:14px">Choose a plan</legend>
-      <div class="plans">${SITE.prices.map(([c, n, p, d]) => `<label class="plan"><input type="radio" name="plan" value="${c}"${c === chosen ? ' checked' : ''}>
+  card.innerHTML = `${head}
+    <div class="status-head"><span class="pill warn">Free trial</span><span class="muted">30 days from installing Curavo</span></div>
+    <p class="lead">Keep Curavo after the trial</p>
+    <p class="muted">One plan, every feature. Billing never stops, even without internet.</p>
+    <div class="plan-strip">${SITE.prices.map(([c, n, p]) => `<button type="button" class="plan-chip" data-plan="${c}"><span>${n}</span><b>${p}</b></button>`).join('')}</div>`;
+  card.querySelectorAll('.plan-chip').forEach((b) => { b.onclick = () => subscriptionCard(me, { step: 1, plan: b.dataset.plan }); });
+}
+
+function checkoutSteps(card, me, flow) {
+  const labels = ['Plan', 'Shop details', 'Confirm'];
+  const steps = `<ol class="steps" aria-label="Steps">${labels.map((l, i) => `<li class="${i + 1 < flow.step ? 'done' : i + 1 === flow.step ? 'now' : ''}"${i + 1 === flow.step ? ' aria-current="step"' : ''}><span>${i + 1}</span>${l}</li>`).join('')}</ol>`;
+  const back = (to) => `<button class="btn btn-ghost" type="button" data-back="${to}">${to ? 'Back' : 'Cancel'}</button>`;
+  const wire = () => card.querySelectorAll('[data-back]').forEach((b) => {
+    b.onclick = () => (b.dataset.back === '0' ? subscriptionCard(me) : subscriptionCard(me, { ...flow, step: Number(b.dataset.back) }));
+  });
+
+  if (flow.step === 1) {
+    card.innerHTML = `<h2 id="h-sub">Choose your plan</h2>${steps}
+      <form novalidate><fieldset class="bare"><legend class="sr-only">Plan</legend>
+      <div class="plans">${SITE.prices.map(([c, n, p, d]) => `<label class="plan"><input type="radio" name="plan" value="${c}"${c === flow.plan ? ' checked' : ''}>
         <span class="plan-name"><span class="radio" aria-hidden="true"></span><span>${n}<br><span class="muted">${d}</span></span></span><b>${p}</b></label>`).join('')}</div></fieldset>
-      <p class="muted" style="margin-top:12px">GST included. No payment online yet: after you confirm, our team calls you to complete it by UPI.</p>
-      <div class="msg"></div>
-      <div class="btn-row"><button class="btn btn-primary" type="submit">Confirm plan</button>${picking ? '<button class="btn btn-ghost" type="button" id="pback">Back</button>' : ''}</div>
-    </form>`;
-  box.querySelector('#pback')?.addEventListener('click', () => planBox(me, active));
-  onSubmit(box.querySelector('form'), async (f) => {
-    const r = await api('/account/v1/me/plan-request', { method: 'POST', body: { plan: f.get('plan') } });
-    planBox(Object.assign(me, r), active);
-    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      <p class="muted" style="margin-top:12px">GST included. All features in every plan.</p>
+      <div class="btn-row">${back(0)}<button class="btn btn-primary" type="submit">Continue</button></div></form>`;
+    wire();
+    card.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      subscriptionCard(me, { step: 2, plan: new FormData(e.target).get('plan') || flow.plan });
+    });
+    return;
+  }
+  if (flow.step === 2) {
+    card.innerHTML = `<h2 id="h-sub">Your shop</h2>${steps}
+      <p class="muted">Our team calls this number to complete the payment.</p>
+      <form novalidate><div class="msg"></div>${shopFields(me)}
+      <div class="btn-row">${back(1)}<button class="btn btn-primary" type="submit">Continue</button></div></form>`;
+    wire();
+    onSubmit(card.querySelector('form'), async (f) => {
+      if (!String(f.get('shop_name') || '').trim() || !String(f.get('phone') || '').trim())
+        throw new Error('Please fill in the shop name and phone number.');
+      Object.assign(me, await api('/account/v1/me', { method: 'PATCH', body: shopBody(f) }));
+      shopCard(me);
+      subscriptionCard(me, { ...flow, step: 3 });
+    });
+    return;
+  }
+  const [, n, price] = planOf(flow.plan);
+  const row = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+  card.innerHTML = `<h2 id="h-sub">Confirm your request</h2>${steps}
+    <div class="summary">
+      ${row('Plan', esc(n))}
+      ${row('Price', `${esc(price)} <span class="muted">GST included</span>`)}
+      ${row('Shop', esc(me.shop.name) + (me.shop.town ? `, ${esc(me.shop.town)}` : ''))}
+      ${row('Phone', esc(me.shop.phone))}
+      ${row('Payment', 'By UPI, when our team calls you')}
+    </div>
+    <p class="muted">Nothing is charged now. Your free trial keeps running until the payment is done.</p>
+    <form novalidate><div class="msg"></div>
+      <div class="btn-row">${back(2)}<button class="btn btn-primary" type="submit">Confirm request</button></div></form>`;
+  wire();
+  onSubmit(card.querySelector('form'), async () => {
+    Object.assign(me, await api('/account/v1/me/plan-request', { method: 'POST', body: { plan: flow.plan } }));
+    subscriptionCard(me);
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+}
+
+// ------------------------------------------------------------ shop details
+function shopFields(me) {
+  return `<label for="sn">Shop name</label><input id="sn" name="shop_name" value="${esc(me.shop.name)}" autocomplete="organization" required>
+    <div class="two">
+      <div><label for="ph">Phone</label><input id="ph" name="phone" value="${esc(me.shop.phone)}" inputmode="tel" autocomplete="tel" required></div>
+      <div><label for="tw">Town</label><input id="tw" name="town" value="${esc(me.shop.town)}"></div>
+    </div>
+    <label for="gs">GSTIN <span class="muted">(optional)</span></label><input id="gs" name="gstin" value="${esc(me.shop.gstin)}" maxlength="15" style="text-transform:uppercase">
+    <label for="yn">Your name</label><input id="yn" name="name" value="${esc(me.name)}" autocomplete="name">`;
+}
+function shopBody(f) { return { shop_name: f.get('shop_name'), phone: f.get('phone'), town: f.get('town'), gstin: f.get('gstin'), name: f.get('name') }; }
+
+function shopCard(me, editing = false) {
+  const card = document.getElementById('shopcard');
+  const s = me.shop;
+  if (!editing) {
+    const has = s.name || s.phone;
+    card.innerHTML = `<div class="top-right"><h2 id="h-shop" style="margin:0">Shop details</h2><button class="btn btn-ghost btn-sm" id="sedit">${has ? 'Edit' : 'Add'}</button></div>
+      ${has ? `<div class="summary" style="margin-top:14px">
+        <div class="kv"><span>Shop</span><b>${esc(s.name || '-')}</b></div>
+        <div class="kv"><span>Phone</span><b>${esc(s.phone || '-')}</b></div>
+        <div class="kv"><span>Town</span><b>${esc(s.town || '-')}</b></div>
+        <div class="kv"><span>GSTIN</span><b>${esc(s.gstin || '-')}</b></div>
+        <div class="kv"><span>Owner</span><b>${esc(me.name || '-')}</b></div></div>`
+      : `<p class="muted" style="margin-top:10px">Not added yet. You can also add them when you choose a plan.</p>`}`;
+    card.querySelector('#sedit').onclick = () => shopCard(me, true);
+    return;
+  }
+  card.innerHTML = `<h2 id="h-shop">Shop details</h2>
+    <form novalidate><div class="msg"></div>${shopFields(me)}
+    <div class="btn-row"><button class="btn btn-ghost" type="button" id="scancel">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div></form>`;
+  card.querySelector('#scancel').onclick = () => shopCard(me);
+  onSubmit(card.querySelector('form'), async (f) => {
+    Object.assign(me, await api('/account/v1/me', { method: 'PATCH', body: shopBody(f) }));
+    shopCard(me);
+    const sub = document.getElementById('subcard');
+    if (sub && !sub.querySelector('.steps')) subscriptionCard(me);   // e.g. the phone shown on a waiting request
   });
 }
 
@@ -525,6 +656,13 @@ function route() {
   // Opened as a plain file (preview), the page name comes from ?page=
   let path = location.pathname.replace(/\/+$/, '');
   if (path.endsWith('.html')) path = '/' + (params.get('page') || 'account');
+  // /account?plan=YEARLY from the home page's price cards: remember the plan
+  // (it survives signing up and the confirm-your-email link), then tidy the URL.
+  if (params.get('plan')) {
+    store(PLAN_KEY, params.get('plan').toUpperCase());
+    params.delete('plan');
+    history.replaceState({}, '', location.pathname + (params.toString() ? '?' + params : ''));
+  }
   if (path === '/link') return linkScreen(params.get('code'));
   if (path === '/account/verify') return verifyScreen(params.get('token'));
   if (path === '/account/reset') return resetScreen(params.get('token'));

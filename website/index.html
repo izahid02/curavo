@@ -146,6 +146,7 @@ section.row { padding-block: clamp(56px, 7vw, 96px) 0; }
 .plan .perday { font-family: var(--font-mono); font-size: 14px; color: var(--mint); font-weight: 500; }
 .plan .save { font-size: 14px; color: var(--ink-2); min-height: 22px; }
 .plan .btn { margin-top: 16px; }
+.trial-note { text-align: center; margin: 18px 0 0; color: var(--ink-2); }
 .included { max-width: 1000px; margin: 22px auto 0; display: flex; flex-wrap: wrap; gap: 8px 22px; justify-content: center; font-size: 15px; color: var(--ink-2); }
 .included span::before { content: "\2713"; color: var(--mint); font-weight: 700; margin-right: 6px; }
 @media (max-width: 860px) { .plans { grid-template-columns: 1fr; max-width: 440px; } }
@@ -212,7 +213,7 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
       <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
     </nav>
-    <a class="signin" href="/account">Sign in</a>
+    <a class="signin" id="signin" href="/account">Sign in</a>
     <a class="btn btn-primary" href="#start"><span class="long">Try free for 30 days</span><span class="short">Try free</span></a>
   </div>
 </header>
@@ -346,14 +347,14 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
           <span class="price">₹589<small> / month</small></span>
           <span class="perday">about ₹20 a day</span>
           <span class="save">Pay as you go</span>
-          <a class="btn btn-ghost" href="#start">Start free trial</a>
+          <a class="btn btn-ghost" href="/account?plan=MONTHLY">Choose Monthly</a>
         </div>
         <div class="plan">
           <span class="name">Half-yearly</span>
           <span class="price">₹2,899<small> / 6 months</small></span>
           <span class="perday">about ₹16 a day</span>
           <span class="save">Save ₹635 compared with monthly</span>
-          <a class="btn btn-ghost" href="#start">Start free trial</a>
+          <a class="btn btn-ghost" href="/account?plan=HALF_YEARLY">Choose Half-yearly</a>
         </div>
         <div class="plan best">
           <span class="badge">Best value</span>
@@ -361,9 +362,10 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
           <span class="price">₹4,999<small> / year</small></span>
           <span class="perday">about ₹14 a day</span>
           <span class="save">Save ₹2,069 · about 3½ months free</span>
-          <a class="btn btn-primary" href="#start">Start free trial</a>
+          <a class="btn btn-primary" href="/account?plan=YEARLY">Choose Yearly</a>
         </div>
       </div>
+      <p class="trial-note">Not sure yet? <a href="#start">Start the 30-day free trial</a>. No payment needed.</p>
       <div class="included">
         <span>All features</span><span>Daily cloud backup</span><span>Automatic updates</span><span>Support on WhatsApp</span><span>Prices include 18% GST</span>
       </div>
@@ -456,6 +458,17 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
 </footer>
 
 <script>
+// Signed in on curavo.in/account?  Then the header says "My account" instead
+// of "Sign in" (the session is kept in this browser by the account page).
+(function () {
+  try {
+    const t = localStorage.getItem('curavo_session');
+    if (!t) return;
+    const exp = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp;
+    if (exp && exp * 1000 > Date.now()) document.getElementById('signin').textContent = 'My account';
+  } catch (e) { /* private mode or an odd token: keep "Sign in" */ }
+})();
+
 /* Site settings.  Fill these in before going live; until then the page shows
    a highlighted placeholder wherever one is missing. */
 const SITE = {
