@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import platform
 import sqlite3
 import threading
@@ -40,8 +41,9 @@ from app.models.cloud import CloudState
 from app.services import backup_crypto, licence
 from app.version import VERSION
 
-# Filled in when the production server exists (e.g. https://cloud.curavo.in).
-DEFAULT_CLOUD_URL = ""
+# The real Curavo cloud (live since Nov 2026).  Used ONLY by the installed
+# desktop app - see cloud_url().
+DEFAULT_CLOUD_URL = "https://cloud.curavo.in"
 
 ROUND_SECONDS = 15 * 60
 # With an owner phone connected, rounds run every 5 minutes so the phone's
@@ -63,7 +65,10 @@ def cloud_url() -> str:
       2. a file cloud_url.txt in the data folder - one line, e.g.
          http://192.168.1.20:8100 - so a TEST PC can be pointed at the test
          cloud on Zahid's Mac without rebuilding anything
-      3. DEFAULT_CLOUD_URL (the real server, once it exists)
+      3. DEFAULT_CLOUD_URL (the real server) - but ONLY in the installed app.
+         Running from source (a developer's Mac, every test script) the cloud
+         stays OFF unless 1 or 2 asks for it, so no test or dev database can
+         ever register a fake shop on the real server or upload to it.
     """
     env = os.environ.get("CURAVO_CLOUD_URL")
     if env is not None:
@@ -76,6 +81,8 @@ def cloud_url() -> str:
                 return line.rstrip("/")
     except (OSError, IndexError):
         pass
+    if not getattr(sys, "frozen", False):          # PyInstaller sets this in the installed app
+        return ""
     return DEFAULT_CLOUD_URL.rstrip("/")
 
 

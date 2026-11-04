@@ -167,7 +167,22 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app) as shop:
     (sandbox / "shop" / "cloud_url.txt").write_text("http://192.168.1.20:8100/\n")
     check("cloud_url.txt points a test PC at a test cloud", cloud_agent.cloud_url(), "http://192.168.1.20:8100")
     (sandbox / "shop" / "cloud_url.txt").write_text("not a url")
-    check("a junk cloud_url.txt is ignored", cloud_agent.cloud_url(), cloud_agent.DEFAULT_CLOUD_URL)
+    check("a junk cloud_url.txt is ignored (from source: cloud off)", cloud_agent.cloud_url(), "")
+    # The installed app (PyInstaller sets sys.frozen) falls back to the real cloud;
+    # code run from source - every test and a dev Mac - never does.
+    import sys as _sys
+    _sys.frozen = True
+    try:
+        check("installed app: junk file -> the real cloud", cloud_agent.cloud_url(), "https://cloud.curavo.in")
+        (sandbox / "shop" / "cloud_url.txt").unlink()
+        check("installed app: no file -> the real cloud", cloud_agent.cloud_url(), "https://cloud.curavo.in")
+        _os_env = __import__("os").environ
+        _os_env["CURAVO_CLOUD_URL"] = ""
+        check("installed app: CURAVO_CLOUD_URL='' switches it off", cloud_agent.cloud_url(), "")
+        del _os_env["CURAVO_CLOUD_URL"]
+    finally:
+        del _sys.frozen
+    check("from source, no file: cloud off", cloud_agent.cloud_url(), "")
 
 shutil.rmtree(sandbox, ignore_errors=True)
 print("\n" + "=" * 58)

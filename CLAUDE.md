@@ -744,8 +744,11 @@ Current stock of a product = SUM(quantity_available) across
   uploads ONE locked backup a day (IST), sends error reports and activates a
   licence key the control panel queued.  Every failure is caught and written to
   cloud_state.last_error in plain ASCII; it is retried next round.  Billing never
-  waits for it.  Switched off entirely while CURAVO_CLOUD_URL /
-  DEFAULT_CLOUD_URL is empty (true until the production server exists).
+  waits for it.  The INSTALLED app uses DEFAULT_CLOUD_URL
+  (https://cloud.curavo.in, on since v0.4.0); code run FROM SOURCE (a dev Mac,
+  every test script) keeps the cloud OFF unless CURAVO_CLOUD_URL or
+  <data>/cloud_url.txt says otherwise, so no test can register a fake shop on
+  the real server.  CURAVO_CLOUD_URL="" switches it off anywhere.
   ⚠ A BACKUP IS LOCKED ON THE PC BEFORE UPLOAD (services/backup_crypto.py):
   AES-256-GCM; its data key wrapped for ARZ (X25519 recovery key - secret half
   only on Zahid's Mac, next to the licence key) and for the shop (its own key in
