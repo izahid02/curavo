@@ -413,7 +413,7 @@ async function accountScreen() {
       </section>
       <section class="card" aria-labelledby="h-shop">
         <h2 id="h-shop">Your shop</h2>
-        <form novalidate><div class="msg"></div>
+        <form novalidate id="shopform"><div class="msg"></div>
           <label for="sn">Shop name</label><input id="sn" name="shop_name" value="${esc(me.shop.name)}" autocomplete="organization">
           <div class="two">
             <div><label for="ph">Phone</label><input id="ph" name="phone" value="${esc(me.shop.phone)}" inputmode="tel" autocomplete="tel"></div>
@@ -440,7 +440,7 @@ async function accountScreen() {
       <section class="card" aria-labelledby="h-pw">
         <h2 id="h-pw">${me.has_password ? 'Change password' : 'Add a password'}</h2>
         ${me.has_password ? '' : '<p class="muted">You sign in with Google. A password lets you sign in with your email too.</p>'}
-        <form novalidate><div class="msg"></div>
+        <form novalidate id="pwform"><div class="msg"></div>
           ${me.has_password ? '<label for="cp">Current password</label><input id="cp" name="current" type="password" autocomplete="current-password">' : ''}
           <label for="np">New password</label><input id="np" name="new" type="password" autocomplete="new-password" minlength="8">
           <button class="btn btn-ghost" type="submit" style="margin-top:16px">Save password</button>
@@ -450,7 +450,7 @@ async function accountScreen() {
   </div>`;
   planBox(me, active);
   document.getElementById('signout').onclick = () => { token = null; store(TOKEN_KEY, null); signInScreen(note('ok', 'Signed out.')); };
-  const [shopForm, pwForm] = app.querySelectorAll('form');
+  const shopForm = document.getElementById('shopform'), pwForm = document.getElementById('pwform');   // by id: the plan picker is a form too
   onSubmit(shopForm, async (f) => {
     Object.assign(me, await api('/account/v1/me', { method: 'PATCH', body: { shop_name: f.get('shop_name'), phone: f.get('phone'), town: f.get('town'), gstin: f.get('gstin'), name: f.get('name') } }));
     shopForm.querySelector('.msg').innerHTML = note('ok', 'Saved.');
