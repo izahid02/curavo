@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Runs copy-cloud-to-mac.command every Sunday at 11:00.  If the Mac was
+     asleep then, macOS runs it when the Mac wakes. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>in.curavo.cloud-copy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-c</string>
+    <string>"$HOME/Projects/curavo/tools/cloud/copy-cloud-to-mac.command"</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>0</integer><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/tmp/curavo-cloud-copy.out</string>
+  <key>StandardErrorPath</key><string>/tmp/curavo-cloud-copy.err</string>
+</dict>
+</plist>
