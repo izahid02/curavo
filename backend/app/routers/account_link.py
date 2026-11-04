@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import LoginResponse, TokenResponse, UserInfo
-from app.services.auth_service import create_access_token, get_current_user
+from app.services.auth_service import create_access_token, get_current_user, verify_password
 from app.services.cloud_agent import CloudError, agent, get_state
 
 router = APIRouter(tags=["Curavo account"])
@@ -51,13 +51,27 @@ def _cloud_or_503():
         raise HTTPException(status_code=503, detail="The Curavo cloud is not switched on for this PC.")
 
 
+DEFAULT_PASSWORD = "admin123"      # the seeded first login - printed in every guide
+
+
 @router.get("/account")
-def account_status(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+def account_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     st = get_state(db)
     linked_user = db.get(User, st.account_user_id) if st.account_user_id else None
+    who = linked_user or user
     return {"cloud_enabled": agent.enabled, "linked": bool(st.account_id),
             "email": st.account_email, "name": st.account_name, "linked_at": _iso(st.account_linked_at),
-            "offline_user": linked_user.username if linked_user else None}
+            "offline_user": linked_user.username if linked_user else None,
+            # The owner's offline sign-in is only as safe as its password; the
+            # screen warns while it is still the well-known default.
+            "default_password": verify_password(DEFAULT_PASSWORD, who.password_hash)}
+
+
+@router.get("/auth/account-login/available")
+def account_login_available(db: Session = Depends(get_db)):
+    """For the login screen (no login yet): show the account button only on a linked PC."""
+    st = get_state(db)
+    return {"available": bool(agent.enabled and st.account_id and st.account_user_id)}
 
 
 @router.post("/account/link", status_code=201)

@@ -4,6 +4,7 @@ import { api, setAuthToken } from '../lib/api';
 import { saveToken } from '../lib/auth';
 import { usePharmacy } from '../lib/pharmacy.jsx';
 import ARZLogo from '../components/shared/ARZLogo';
+import { AccountSignInButton } from '../lib/curavoAccount.jsx';
 /**
  * Login screen — full-screen glassmorphism card centered on the body gradient.
  * Submits to POST /api/auth/login, saves the JWT on success.
@@ -137,6 +138,16 @@ export default function Login() {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
+
+        {/* Owner: sign in with the Curavo account (only on a linked PC, needs internet). */}
+        <AccountSignInButton
+          disabled={loading}
+          onSignedIn={(data) => {
+            saveToken(data.token.access_token, data.user);
+            setAuthToken(data.token.access_token);
+            navigate('/');
+          }}
+        />
 
         <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 24 }}>
           {pharmacy.pharmacy_name} © {new Date().getFullYear()}

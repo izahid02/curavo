@@ -9,6 +9,7 @@ import Icon from './shared/Icon';
 import { LicenceBanner, LicencePill, LicenceProvider, useLicence } from '../lib/licence.jsx';
 import { UpdateBanner } from '../lib/updater.jsx';
 import { OwnerAppModal } from '../lib/ownerApp.jsx';
+import { CuravoAccountModal } from '../lib/curavoAccount.jsx';
 /** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
  *  in backend/app/routers/settings.py — the backend enforces it either way. */
 const PHARMACY_SETTINGS_ROLES = ['Owner', 'Administrator'];
@@ -127,6 +128,7 @@ export default function Layout() {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showPharmacySettings, setShowPharmacySettings] = useState(false);
   const [showOwnerApp, setShowOwnerApp] = useState(false);
+  const [showCuravoAccount, setShowCuravoAccount] = useState(false);
   const [profile, setProfile]                     = useState(null);
   const [avatarUrl, setAvatarUrl]                 = useState(null);
   const [avatarError, setAvatarError]             = useState(null);
@@ -980,6 +982,23 @@ export default function Layout() {
               />
             )}
 
+            {/* Curavo account - the owner's sign-in on curavo.in, which brings
+                the subscription to this PC.  Linking is an owner decision. */}
+            {PHARMACY_SETTINGS_ROLES.includes(profile?.role || user?.role_name) && (
+              <MenuItem
+                color="#1e1b4b"
+                hover="rgba(99,102,241,0.06)"
+                onClick={() => { setAccountMenuOpen(false); setShowCuravoAccount(true); }}
+                icon={(
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.8">
+                    <circle cx="12" cy="8" r="4" />
+                    <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+                  </svg>
+                )}
+                label="Curavo account"
+              />
+            )}
+
             {/* Owner app on phone - connecting a phone shows this shop's sales
                 to whoever holds it, so it is an owner decision. */}
             {PHARMACY_SETTINGS_ROLES.includes(profile?.role || user?.role_name) && (
@@ -1044,6 +1063,9 @@ export default function Layout() {
           }}
         />
       )}
+
+      {/* ══ CURAVO ACCOUNT ══════════════════════════════════════════ */}
+      {showCuravoAccount && <CuravoAccountModal onClose={() => setShowCuravoAccount(false)} />}
 
       {/* ══ OWNER APP ON PHONE ═══════════════════════════════════════ */}
       {showOwnerApp && <OwnerAppModal onClose={() => setShowOwnerApp(false)} />}

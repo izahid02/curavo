@@ -94,6 +94,7 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app, raise_server_exception
     st = shop.get("/api/account", headers=H).json()
     check("not linked yet", (st["cloud_enabled"], st["linked"]), (True, False))
     check("account sign-in on the login screen refused until linked", shop.post("/api/auth/account-login").status_code, 409)
+    check("...and the login screen hides the button", shop.get("/api/auth/account-login/available").json()["available"], False)
 
     print("[2] Linking the PC to the owner's account")
     r = shop.post("/api/account/link", headers=H)
@@ -159,6 +160,9 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app, raise_server_exception
     licence.PUBLIC_KEYS = [pub(MASTER)]
     check("a PC that does not trust the cloud key would refuse it", licence.licence_status(SessionLocal())["state"] != "ACTIVE", True)
     licence.PUBLIC_KEYS = [pub(MASTER), pub(ONLINE)]
+
+    check("login screen knows the account button can show", shop.get("/api/auth/account-login/available").json()["available"], True)
+    check("PC warns: offline user still has the default password", shop.get("/api/account", headers=H).json()["default_password"], True)
 
     print("[6] Signing in on the PC with the account")
     r = shop.post("/api/auth/account-login")
