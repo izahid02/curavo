@@ -37,6 +37,13 @@ class CloudState(Base):
     # Owner app: last summary sent, and the day the morning notification went.
     owner_summary_at  = Column(DateTime, nullable=True)
     owner_push_on     = Column(Date, nullable=True)
+    # The owner's Curavo account this PC is linked to (routers/account_link.py),
+    # and which LOCAL user signing in with that account becomes.
+    account_id        = Column(Integer, nullable=True)
+    account_email     = Column(String(254), nullable=True)
+    account_name      = Column(String(120), nullable=True)
+    account_linked_at = Column(DateTime, nullable=True)
+    account_user_id   = Column(Integer, nullable=True)
 
 
 class ErrorReport(Base):

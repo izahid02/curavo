@@ -264,3 +264,37 @@ class AccountToken(Base):
     created_at = Column(DateTime, default=utcnow)
     expires_at = Column(DateTime, nullable=False)
     used_at    = Column(DateTime)
+
+
+class DeviceLink(Base):
+    """
+    "Sign in with your Curavo account" on a shop PC.  The PC asks for a short
+    code, opens curavo.in/link?code=..., the owner signs in there and presses
+    Allow; the PC, checking every few seconds, sees the answer.
+      LINK   join this PC's shop to the account (once)
+      LOGIN  sign the owner in on a PC already linked to the account
+    """
+    __tablename__ = "device_links"
+
+    id         = Column(Integer, primary_key=True)
+    code       = Column(String(8), unique=True, nullable=False, index=True)
+    shop_id    = Column(Integer, ForeignKey("shops.id"), index=True, nullable=False)
+    purpose    = Column(String(6), nullable=False)                 # LINK / LOGIN
+    status     = Column(String(10), default="PENDING", nullable=False)   # PENDING/APPROVED/REFUSED/USED
+    account_id = Column(Integer, ForeignKey("accounts.id"))
+    created_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    decided_at = Column(DateTime)
+
+
+class IssuedKey(Base):
+    """Licence keys the cloud made by itself (for paid accounts) - a ledger, like issued.csv on the Mac."""
+    __tablename__ = "issued_keys"
+
+    id         = Column(Integer, primary_key=True)
+    shop_id    = Column(Integer, ForeignKey("shops.id"), index=True, nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"))
+    until      = Column(String(10), nullable=False)
+    plan       = Column(String(20))
+    key        = Column(Text, nullable=False)
+    issued_at  = Column(DateTime, default=utcnow)

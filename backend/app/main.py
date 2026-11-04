@@ -49,6 +49,7 @@ from app.routers import licence as licence_router
 from app.routers import cloud as cloud_router
 from app.routers import diagnostics as diagnostics_router
 from app.routers import owner_app as owner_app_router
+from app.routers import account_link as account_link_router
 from app.routers import regulated as regulated_router
 
 
@@ -502,6 +503,11 @@ def _run_db_migrations() -> None:
         # if Curavo is restarted.
         "ALTER TABLE cloud_state ADD COLUMN owner_summary_at DATETIME",
         "ALTER TABLE cloud_state ADD COLUMN owner_push_on DATE",
+    "ALTER TABLE cloud_state ADD COLUMN account_id INTEGER",
+    "ALTER TABLE cloud_state ADD COLUMN account_email VARCHAR(254)",
+    "ALTER TABLE cloud_state ADD COLUMN account_name VARCHAR(120)",
+    "ALTER TABLE cloud_state ADD COLUMN account_linked_at DATETIME",
+    "ALTER TABLE cloud_state ADD COLUMN account_user_id INTEGER",
     ]
 
     db = SessionLocal()
@@ -1229,6 +1235,7 @@ app.include_router(cloud_router.router, prefix="/api")
 app.include_router(diagnostics_router.router, prefix="/api")
 # Owner app on the phone: connect / list / remove phones.
 app.include_router(owner_app_router.router, prefix="/api")
+app.include_router(account_link_router.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------

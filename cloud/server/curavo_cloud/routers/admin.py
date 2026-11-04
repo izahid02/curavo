@@ -29,8 +29,8 @@ from sqlalchemy.orm import Session
 
 from curavo_cloud import storage
 from curavo_cloud.db import get_db
-from curavo_cloud.models import (AdminAudit, AdminUser, Backup, ErrorGroup, Heartbeat, Lead, MobileDevice,
-                                 OwnerSummary, Shop)
+from curavo_cloud.models import (Account, AdminAudit, AdminUser, Backup, ErrorGroup, Heartbeat, Lead,
+                                 MobileDevice, OwnerSummary, Shop)
 from curavo_cloud.routers.agent import peek_licence
 from curavo_cloud.security import check_password, current_admin, hash_password, make_admin_token
 
@@ -88,6 +88,12 @@ def _open_error_counts(db) -> dict:
     rows = (db.query(ErrorGroup.shop_id, func.count(ErrorGroup.id))
             .filter(ErrorGroup.resolved_at.is_(None)).group_by(ErrorGroup.shop_id).all())
     return dict(rows)
+
+
+def _owner_of(db, shop):
+    """The Curavo account that owns this shop, in short - or None."""
+    a = db.get(Account, shop.account_id) if shop.account_id else None
+    return {"id": a.id, "email": a.email, "name": a.name, "plan": a.plan, "paid_until": a.paid_until} if a else None
 
 
 def _get_shop(db, code) -> Shop:
@@ -195,6 +201,7 @@ def shop_detail(code: str, admin: AdminUser = Depends(current_admin), db: Sessio
                      "size": b.size, "app_version": b.app_version, "sha256": b.sha256} for b in backups],
         "errors": [_error_row(e, shop) for e in errors],
         "heartbeats": [{"at": _iso(h.at), "app_version": h.app_version} for h in beats],
+        "account": _owner_of(db, shop),
         # Owner app: which phones, and when the PC last left figures for them.
         # The figures themselves are locked for the phones - not readable here.
         "phones": [{"name": d.name, "status": d.status, "connected_at": _iso(d.created_at),
@@ -342,3 +349,76 @@ def audit(admin: AdminUser = Depends(current_admin), db: Session = Depends(get_d
     return [{"at": _iso(a.at), "admin": a.admin, "action": a.action, "detail": a.detail,
              "shop_code": s.shop_code if s else None, "shop_name": s.shop_name if s else None}
             for a, s in rows]
+
+
+# ---------------------------------------------------------------------------
+# Customer accounts (the owners who sign in on curavo.in)
+# ---------------------------------------------------------------------------
+
+def _account_row(db, a) -> dict:
+    shops = db.query(Shop).filter(Shop.account_id == a.id).all()
+    return {"id": a.id, "email": a.email, "name": a.name, "email_verified": a.email_verified,
+            "google": bool(a.google_sub), "created_at": _iso(a.created_at), "last_login_at": _iso(a.last_login_at),
+            "disabled": a.disabled, "shop_name": a.shop_name, "phone": a.phone, "town": a.town, "gstin": a.gstin,
+            "plan": a.plan, "paid_until": a.paid_until,
+            "shops": [{"shop_code": s.shop_code, "shop_name": s.shop_name} for s in shops]}
+
+
+@router.get("/accounts")
+def list_accounts(admin: AdminUser = Depends(current_admin), db: Session = Depends(get_db)):
+    return [_account_row(db, a) for a in db.query(Account).order_by(Account.created_at.desc()).limit(1000).all()]
+
+
+class AccountPatch(BaseModel):
+    plan: str | None = None
+    paid_until: str | None = None      # YYYY-MM-DD, or "" to clear
+    disabled: bool | None = None
+
+
+PLANS = ("MONTHLY", "HALF_YEARLY", "YEARLY", "FOUNDING")
+
+
+@router.patch("/accounts/{account_id}")
+def update_account(account_id: int, body: AccountPatch, admin: AdminUser = Depends(current_admin),
+                   db: Session = Depends(get_db)):
+    """
+    Set an account's subscription by hand (HCC, pilot shops, a UPI payment)
+    until online payments exist.  A paid-until date makes the cloud issue the
+    licence key for every shop linked to the account, delivered on its next
+    check-in.
+    """
+    from datetime import date
+    from curavo_cloud import licence_issuer
+    a = db.get(Account, account_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="No such account.")
+    if body.plan is not None:
+        if body.plan and body.plan not in PLANS:
+            raise HTTPException(status_code=400, detail=f"Plan must be one of {', '.join(PLANS)}.")
+        a.plan = body.plan or None
+    if body.paid_until is not None:
+        if body.paid_until:
+            try:
+                date.fromisoformat(body.paid_until)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Paid until must be a date like 2027-11-30.")
+        a.paid_until = body.paid_until or None
+    if body.disabled is not None:
+        a.disabled = body.disabled
+        if body.disabled:
+            a.session_version = (a.session_version or 1) + 1      # signed out everywhere
+    _audit(db, admin, "account_update", None, f"{a.email}: plan={a.plan} paid_until={a.paid_until} disabled={a.disabled}")
+    issued = [licence_issuer.issue_if_paid(db, s, a) for s in db.query(Shop).filter(Shop.account_id == a.id).all()]
+    db.commit()
+    return {**_account_row(db, a), "keys_sent": sum(1 for k in issued if k is not None),
+            "issuing_enabled": licence_issuer.enabled()}
+
+
+@router.post("/shops/{code}/unlink-account")
+def unlink_account(code: str, admin: AdminUser = Depends(current_admin), db: Session = Depends(get_db)):
+    """Free a shop from its account (it moved owner) - the next owner links it again."""
+    shop = _get_shop(db, code)
+    _audit(db, admin, "unlink_account", shop, str(shop.account_id))
+    shop.account_id = None
+    db.commit()
+    return {"ok": True}

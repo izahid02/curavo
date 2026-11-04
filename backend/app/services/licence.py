@@ -75,7 +75,11 @@ GRACE_DAYS = 15
 # issued: add the new public key here, keep the old one until its keys expire.
 # THIS IS NOT A SECRET.  The private half lives only on Zahid's Mac.
 PUBLIC_KEYS = [
-    "OZIGaDO0XjxYAPoVM5Vo8mD8SYk9IgXXuSfrD2Jlf7Y=",   # ARZ key 1, made 2 Nov 2026
+    "OZIGaDO0XjxYAPoVM5Vo8mD8SYk9IgXXuSfrD2Jlf7Y=",   # ARZ key 1, made 2 Nov 2026 (Zahid's Mac)
+    # The Curavo cloud's own key (made 4 Nov 2026): it issues keys by itself
+    # for accounts that paid.  Secret half only on the cloud server - never
+    # the master key above.
+    "LSctnCiArFk8UPdOxdf0OC/Xx6SpsGB7W7ltHW0aWVo=",
 ]
 
 KEY_PREFIX = "CURAVO-"
