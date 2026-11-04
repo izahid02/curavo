@@ -12,18 +12,22 @@ Anything in [square brackets] must be filled in.
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-UPDATED = "2 November 2026"
+UPDATED = "4 November 2026"
 DRAFT_NOTE = "Draft for review. Not yet checked by a lawyer."
 
-NAME = "[ARZ Solutions registered name]"
-ADDRESS = "[ARZ registered address]"
-EMAIL = "[email]"
-WHATSAPP = "[WhatsApp number]"
-GRIEVANCE = "[Name of grievance officer]"
+NAME = "ARZ Solutions (a partnership firm)"
+ADDRESS = "Bisandai Pt 1, Golakganj, Dhubri, Assam 783334"
+EMAIL = "rausansheikh24@gmail.com"
+WHATSAPP = "+91 69014 74078"
+GRIEVANCE = "Rausan Sheikh, CEO"
+COURTS = "Dhubri, Assam"
 
 
 def ph(text):
-    return f'<span class="ph">{text}</span>'
+    """A filled-in detail.  Anything still in [square brackets] is shown highlighted, to be filled."""
+    if text.startswith("["):
+        return f'<span class="ph">{text}</span>'
+    return text
 
 
 PAGES = {
@@ -35,10 +39,12 @@ PAGES = {
 
 <h2>2. What reaches ARZ</h2>
 <ul>
-<li><b>Daily cloud backup.</b> Once a day Curavo makes a copy of your database, together with your shop's logo and signature, and <b>locks (encrypts) it on your PC</b> before sending it to our server in India. The server stores the locked file and cannot open it. Two keys can open it: your shop's own key, kept inside your Curavo, and ARZ's recovery key, kept offline by ARZ. We use the recovery key only to restore your data (for example when your PC is lost or damaged), when you ask us to, or when the law requires it. We keep backups for 30 days.</li>
+<li><b>Daily cloud backup.</b> Once a day Curavo makes a copy of your database, together with your shop's logo and signature, and <b>locks (encrypts) it on your PC</b> before sending it to our cloud server. The server stores the locked file and cannot open it. Two keys can open it: your shop's own key, kept inside your Curavo, and ARZ's recovery key, kept offline by ARZ. We use the recovery key only to restore your data (for example when your PC is lost or damaged), when you ask us to, or when the law requires it. We keep backups for 30 days.</li>
 <li><b>Check-ins.</b> About every 15 minutes Curavo tells our server your shop code, shop name, Curavo version, Windows version, subscription status, database size, free disk space and the number of bills made today. We use this to support you and to see that backups are working.</li>
 <li><b>Error reports.</b> When Curavo crashes it sends a technical report: what failed, where in the program, and which screen. These reports can occasionally contain a short piece of text from your data. We use them only to fix Curavo.</li>
 <li><b>Licence.</b> Your shop code and licence key, so your subscription can be checked and renewed.</li>
+<li><b>Your Curavo account.</b> The shop owner's account on curavo.in: email address, name, shop name, phone, town and GSTIN (if entered), and the password - stored only in scrambled (hashed) form, so nobody at ARZ can read it. If you choose "Continue with Google", Google tells us your name and email address; we never see your Google password.</li>
+<li><b>Owner app.</b> If the owner connects a phone, the shop PC sends a summary (today's sales, stock, expiry, patient credit) <b>locked so that only the owner's connected phones can open it</b> - not our server and not ARZ. Phone notifications say only how many items need attention, never amounts or names, because they pass through Google's notification service.</li>
 <li><b>Website forms.</b> If you book a demo we receive your name, mobile number, shop name and town.</li>
 </ul>
 
@@ -46,7 +52,8 @@ PAGES = {
 <p>Your patients' details belong to your pharmacy. For that information you decide what is collected and why, and ARZ handles it only on your behalf: to keep the locked backups and to restore them. We do not read, sell, share or use your patients' data for anything else, including marketing.</p>
 
 <h2>4. Who we share information with</h2>
-<p>Nobody, except: the hosting company that runs our server in India (it stores only locked backups and the information in section 2); a payment provider when you pay online; and authorities when the law requires it.</p>
+<p>Nobody, except: the hosting company that runs our server (Amazon Web Services; it stores only locked backups and the information in section 2); the email service that sends account emails (confirm your email, reset your password); Google, if you sign in with Google or receive owner-app notifications; a payment provider when you pay online; and authorities when the law requires it.</p>
+<p><b>Where the server is.</b> During the pilot our server runs in Amazon's data centre in Sydney, Australia. We will move it to India before Curavo is offered to everyone and will update this page when we do.</p>
 
 <h2>5. Security</h2>
 <p>Backups are encrypted with AES-256 on your PC before upload. Licence keys and app updates are digitally signed, so they cannot be forged. Access to our server and control panel is limited to ARZ staff.</p>
@@ -58,7 +65,7 @@ PAGES = {
 </ul>
 
 <h2>7. Grievance officer</h2>
-<p>For any question or complaint about privacy, contact {ph(GRIEVANCE)} at {ph(EMAIL)} or WhatsApp {ph(WHATSAPP)}. Address: {ph(ADDRESS)}. We reply within 7 working days.</p>
+<p>For any question or complaint about privacy, contact our grievance officer, {ph(GRIEVANCE)}, at {ph(EMAIL)} or WhatsApp {ph(WHATSAPP)}. Address: {ph(ADDRESS)}. We acknowledge every complaint within 2 working days and reply within 7 working days.</p>
 
 <h2>8. Changes</h2>
 <p>If we change this policy we will update this page and the date at the top, and tell you in Curavo if the change matters to you.</p>
@@ -76,7 +83,7 @@ PAGES = {
 <h2>3. Subscription and payment</h2>
 <ul>
 <li>Plans: monthly ₹589, half-yearly ₹2,899, yearly ₹4,999. Prices include 18% GST.</li>
-<li>You pay in advance for the period. After payment we send a licence key for your shop.</li>
+<li>You pay in advance for the period. After payment your subscription reaches your shop PC by itself through your Curavo account (or we send a licence key for your shop).</li>
 <li>We may change prices for future periods with at least 30 days' notice. A period you have already paid for keeps its price.</li>
 </ul>
 
@@ -86,7 +93,7 @@ PAGES = {
 <h2>5. Your responsibilities</h2>
 <ul>
 <li>Check that prices, GST rates, HSN codes and the Schedule H1 register are correct for your shop. Curavo calculates from what you enter.</li>
-<li>Keep your PC in working order and your Curavo passwords private.</li>
+<li>Keep your PC in working order, and your Curavo account and PC passwords private. Change the PC's default password after installing.</li>
 <li>Do not copy Curavo to another shop, share your licence key, or try to get around the licence check.</li>
 </ul>
 
@@ -100,7 +107,7 @@ PAGES = {
 <p>You can stop using Curavo at any time. We may end this agreement if you break these terms, for example by sharing your licence key.</p>
 
 <h2>9. Law</h2>
-<p>These terms are governed by the laws of India. Courts at {ph("[Guwahati]")} have jurisdiction.</p>
+<p>These terms are governed by the laws of India. Courts at {ph(COURTS)} have jurisdiction.</p>
 
 <h2>10. Contact</h2>
 <p>{ph(NAME)}, {ph(ADDRESS)}. Email {ph(EMAIL)}, WhatsApp {ph(WHATSAPP)}.</p>

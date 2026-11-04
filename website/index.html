@@ -403,7 +403,7 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
           <button class="btn btn-primary full" type="submit" id="f-submit">Book my demo</button>
           <div class="form-msg full" id="f-msg" role="status" hidden></div>
         </form>
-        <p class="form-note">Prefer WhatsApp? Message <span class="ph" data-contact="whatsapp">[WhatsApp number]</span></p>
+        <p class="form-note">Prefer WhatsApp? Message <span data-contact="whatsapp">+91 69014 74078</span></p>
       </div>
     </div>
   </section>
@@ -437,9 +437,9 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
     <div>
       <h4>Contact</h4>
       <ul>
-        <li>WhatsApp: <span class="ph" data-contact="whatsapp">[WhatsApp number]</span></li>
-        <li>Email: <span class="ph" data-contact="email">[email]</span></li>
-        <li><span class="ph" data-contact="address">[ARZ registered address]</span></li>
+        <li>WhatsApp: <span data-contact="whatsapp">+91 69014 74078</span></li>
+        <li>Email: <span data-contact="email">rausansheikh24@gmail.com</span></li>
+        <li><span data-contact="address">ARZ Solutions, Bisandai Pt 1, Golakganj, Dhubri, Assam 783334</span></li>
       </ul>
     </div>
     <div>
@@ -450,7 +450,7 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
         <li><a href="refund.html">Refunds and cancellations</a></li>
       </ul>
     </div>
-    <p class="legal">© 2026 <span class="ph" data-contact="legal_name">[ARZ Solutions registered name]</span>. Curavo is a product of ARZ Solutions. Screens shown use a demonstration shop and made-up patients.</p>
+    <p class="legal">© 2026 <span data-contact="legal_name">ARZ Solutions</span>. Curavo is a product of ARZ Solutions. Screens shown use a demonstration shop and made-up patients.</p>
   </div>
 </footer>
 
@@ -458,12 +458,12 @@ footer .legal { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-
 /* Site settings.  Fill these in before going live; until then the page shows
    a highlighted placeholder wherever one is missing. */
 const SITE = {
-  whatsapp: '',                 // e.g. '+91 98640 00000'
-  email: '',                    // e.g. 'hello@curavo.in'
-  address: '',                  // ARZ Solutions' registered address
-  legal_name: '',               // as on the GST / business registration
+  whatsapp: '+91 69014 74078',
+  email: 'rausansheikh24@gmail.com',
+  address: 'Bisandai Pt 1, Golakganj, Dhubri, Assam 783334',
+  legal_name: 'ARZ Solutions',
   download: 'https://cloud.curavo.in/download/windows',
-  leads: '',                    // 'https://cloud.curavo.in/public/leads' once the cloud is live (bookings appear in Curavo Control -> Leads)
+  leads: 'https://cloud.curavo.in/public/leads',   // bookings appear in Curavo Control -> Leads
 };
 
 document.querySelectorAll('[data-contact]').forEach((el) => {
