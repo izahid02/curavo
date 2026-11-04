@@ -16,13 +16,16 @@ const PLAN_LABEL = Object.fromEntries(PLANS.map(([k, l]) => [k, l]));
 const PLAN_PRICE = { MONTHLY: '₹589', HALF_YEARLY: '₹2,899', YEARLY: '₹4,999' };
 const PLAN_MONTHS = Object.fromEntries(PLANS.map(([k, , n]) => [k, n]));
 
-function today() { return new Date().toISOString().slice(0, 10); }
-function addMonths(ymd, n) {
-  const d = new Date(ymd + 'T00:00:00');
+// Dates are counted on the local (India) calendar.  toISOString() would give
+// the UTC date - a day early in India - and cost the customer a day.
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function today() { return ymd(new Date()); }
+function addMonths(from, n) {
+  const d = new Date(from + 'T00:00:00');
   const day = d.getDate();
   d.setMonth(d.getMonth() + n);
   if (d.getDate() < day) d.setDate(0);           // 31 Jan + 1 month -> 28/29 Feb, not 3 Mar
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
 }
 function fmt(ymd) { return ymd ? new Date(ymd + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''; }
 
