@@ -110,7 +110,7 @@ PAGES = {
 <p>These terms are governed by the laws of India. Courts at {ph(COURTS)} have jurisdiction.</p>
 
 <h2>10. Contact</h2>
-<p>{ph(NAME)}, {ph(ADDRESS)}. Email {ph(EMAIL)}, WhatsApp {ph(WHATSAPP)}.</p>
+<p>{ph(NAME)}, {ph(ADDRESS)}. CEO: Rausan Sheikh. Email {ph(EMAIL)}, WhatsApp {ph(WHATSAPP)}.</p>
 """),
 
     "refund": ("Refunds and cancellations", f"""
