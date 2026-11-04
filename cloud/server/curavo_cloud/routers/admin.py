@@ -361,6 +361,7 @@ def _account_row(db, a) -> dict:
             "google": bool(a.google_sub), "created_at": _iso(a.created_at), "last_login_at": _iso(a.last_login_at),
             "disabled": a.disabled, "shop_name": a.shop_name, "phone": a.phone, "town": a.town, "gstin": a.gstin,
             "plan": a.plan, "paid_until": a.paid_until,
+            "requested_plan": a.requested_plan, "requested_at": _iso(a.requested_at),
             "shops": [{"shop_code": s.shop_code, "shop_name": s.shop_name} for s in shops]}
 
 
@@ -373,6 +374,7 @@ class AccountPatch(BaseModel):
     plan: str | None = None
     paid_until: str | None = None      # YYYY-MM-DD, or "" to clear
     disabled: bool | None = None
+    clear_request: bool = False        # "Dismiss" a plan request without switching anything on
 
 
 PLANS = ("MONTHLY", "HALF_YEARLY", "YEARLY", "FOUNDING")
@@ -403,6 +405,12 @@ def update_account(account_id: int, body: AccountPatch, admin: AdminUser = Depen
             except ValueError:
                 raise HTTPException(status_code=400, detail="Paid until must be a date like 2027-11-30.")
         a.paid_until = body.paid_until or None
+        if body.paid_until:
+            a.requested_plan = None    # paid and switched on: the request is done
+            a.requested_at = None
+    if body.clear_request:
+        a.requested_plan = None
+        a.requested_at = None
     if body.disabled is not None:
         a.disabled = body.disabled
         if body.disabled:

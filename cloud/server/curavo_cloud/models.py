@@ -251,6 +251,10 @@ class Account(Base):
     # The subscription (filled by payments; ARZ can also set it in the panel).
     plan            = Column(String(20))             # MONTHLY / HALF_YEARLY / YEARLY / FOUNDING
     paid_until      = Column(String(10))             # YYYY-MM-DD
+    # "Choose this plan" on curavo.in, until ARZ collects the money by hand and
+    # sets the subscription in Curavo Control (which clears it).
+    requested_plan  = Column(String(20))             # MONTHLY / HALF_YEARLY / YEARLY
+    requested_at    = Column(DateTime)
 
 
 class AccountToken(Base):

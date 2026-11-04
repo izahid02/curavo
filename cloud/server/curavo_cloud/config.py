@@ -61,6 +61,8 @@ class Settings:
         self.mail_from = os.environ.get("CURAVO_MAIL_FROM", "Curavo <support@curavo.in>")
         # Where a customer's reply goes (a real inbox), e.g. the CEO's email.
         self.mail_reply_to = os.environ.get("CURAVO_MAIL_REPLY_TO", "")
+        # Who hears about a new plan request (default: the reply-to inbox).
+        self.sales_email = os.environ.get("CURAVO_SALES_EMAIL", "") or self.mail_reply_to
         self.smtp_host = os.environ.get("CURAVO_SMTP_HOST", "")
         self.smtp_port = int(os.environ.get("CURAVO_SMTP_PORT", "587"))
         self.smtp_user = os.environ.get("CURAVO_SMTP_USER", "")

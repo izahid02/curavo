@@ -93,6 +93,14 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .plans { display: grid; gap: 10px; margin-top: 12px; }
 .plan { display: flex; justify-content: space-between; align-items: baseline; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 .plan b { font-size: 18px; }
+label.plan { cursor: pointer; margin: 0; font-weight: 400; transition: border-color .15s, box-shadow .15s; }
+label.plan input { position: absolute; opacity: 0; pointer-events: none; }
+label.plan:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+label.plan:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan-name { display: flex; gap: 10px; align-items: flex-start; }
+.radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; margin-top: 2px; }
+label.plan:has(input:checked) .radio { border: 5px solid var(--accent); }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .top-right { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 #gbtn { min-height: 44px; display: flex; justify-content: center; }
 [hidden] { display: none !important; }
@@ -113,7 +121,7 @@ const SITE = {
   google_client_id: '981276880805-iqp9a9mc4v2q9h8ruhpric21cest34uh.apps.googleusercontent.com',                     // "Sign in with Google" client id (Google Cloud console); '' = button hidden
   download: 'https://cloud.curavo.in/download/windows',
   whatsapp: '+91 69014 74078',              // shown for "pay by UPI" until online payments exist
-  prices: [['Monthly', '₹589', 'about ₹20 a day'], ['Half-yearly', '₹2,899', 'about ₹16 a day'], ['Yearly', '₹4,999', 'about ₹14 a day']],
+  prices: [['MONTHLY', 'Monthly', '₹589', 'about ₹20 a day'], ['HALF_YEARLY', 'Half-yearly', '₹2,899', 'about ₹16 a day'], ['YEARLY', 'Yearly', '₹4,999', 'about ₹14 a day']],
 };
 
 // ------------------------------------------------------------ small helpers
@@ -398,11 +406,10 @@ async function accountScreen() {
       <section class="card" aria-labelledby="h-sub">
         <h2 id="h-sub">Subscription</h2>
         ${active
-          ? `<p><span class="pill ok">Active</span> &nbsp;until <b>${fmtDate(sub.paid_until)}</b>${sub.plan ? ` · ${esc(sub.plan.replace('_', '-').toLowerCase())}` : ''}</p>
+          ? `<p><span class="pill ok">Active</span> &nbsp;until <b>${fmtDate(sub.paid_until)}</b>${sub.plan ? ` · ${esc(planName(sub.plan))}` : ''}</p>
              <p class="muted" style="margin-top:8px">Reaches your shop PC by itself. Nothing to copy or type.</p>`
-          : `<p><span class="pill warn">Free trial</span> &nbsp;30 days from installing Curavo on your shop PC.</p>
-             <div class="plans">${SITE.prices.map(([n, p, d]) => `<div class="plan"><span>${n}<br><span class="muted">${d}</span></span><b>${p}</b></div>`).join('')}</div>
-             <p class="muted" style="margin-top:12px">GST included. Online payment is coming soon. To subscribe now, pay by UPI and message ARZ Solutions${SITE.whatsapp ? ` on WhatsApp <b>${esc(SITE.whatsapp)}</b>` : ''} - your subscription then reaches your PC by itself.</p>`}
+          : `<p><span class="pill warn">Free trial</span> &nbsp;30 days from installing Curavo on your shop PC.</p>`}
+        <div id="planbox"></div>
       </section>
       <section class="card" aria-labelledby="h-shop">
         <h2 id="h-shop">Your shop</h2>
@@ -441,17 +448,66 @@ async function accountScreen() {
       </section>
     </div>
   </div>`;
+  planBox(me, active);
   document.getElementById('signout').onclick = () => { token = null; store(TOKEN_KEY, null); signInScreen(note('ok', 'Signed out.')); };
   const [shopForm, pwForm] = app.querySelectorAll('form');
   onSubmit(shopForm, async (f) => {
-    await api('/account/v1/me', { method: 'PATCH', body: { shop_name: f.get('shop_name'), phone: f.get('phone'), town: f.get('town'), gstin: f.get('gstin'), name: f.get('name') } });
+    Object.assign(me, await api('/account/v1/me', { method: 'PATCH', body: { shop_name: f.get('shop_name'), phone: f.get('phone'), town: f.get('town'), gstin: f.get('gstin'), name: f.get('name') } }));
     shopForm.querySelector('.msg').innerHTML = note('ok', 'Saved.');
+    if (me.subscription.requested_plan) planBox(me, active);
   });
   onSubmit(pwForm, async (f) => {
     const r = await api('/account/v1/me/password', { method: 'POST', body: { current: f.get('current') || '', new: f.get('new') } });
     token = r.token; store(TOKEN_KEY, r.token);
     pwForm.reset();
     pwForm.querySelector('.msg').innerHTML = note('ok', 'Password saved. Other devices were signed out.');
+  });
+}
+
+// ------------------------------------------------------------ choose a plan
+// No online payment yet: the owner chooses, ARZ calls to collect the payment
+// and switches the plan on from Curavo Control.
+function planName(code) { return (SITE.prices.find((p) => p[0] === code) || [code, String(code).replace('_', '-').toLowerCase()])[1]; }
+
+function planBox(me, active, picking = false) {
+  const box = document.getElementById('planbox');
+  if (!box) return;
+  const sub = me.subscription || {};
+  const req = sub.requested_plan && SITE.prices.find((p) => p[0] === sub.requested_plan);
+  if (req && !picking) {
+    box.innerHTML = `<div class="note info" role="status" style="margin-top:14px">
+        <b>Request received: ${esc(req[1])} plan, ${esc(req[2])}.</b><br>
+        Our team will contact you soon${me.shop.phone ? ` on <b>${esc(me.shop.phone)}</b>` : ''} to complete the payment.
+        As soon as it is done, your subscription switches on and reaches your shop PC by itself.</div>
+      <div class="msg"></div>
+      <div class="btn-row"><button class="btn btn-ghost" id="pchange">Change plan</button><button class="btn btn-ghost" id="pcancel">Cancel request</button></div>`;
+    box.querySelector('#pchange').onclick = () => planBox(me, active, true);
+    box.querySelector('#pcancel').onclick = async (e) => {
+      e.target.disabled = true;
+      try { planBox(Object.assign(me, await api('/account/v1/me/plan-request', { method: 'DELETE' })), active); }
+      catch (err) { box.querySelector('.msg').innerHTML = note('err', err.message); e.target.disabled = false; }
+    };
+    return;
+  }
+  if (active && !picking) {
+    box.innerHTML = `<div class="btn-row"><button class="btn btn-ghost" id="prenew">Renew or change plan</button></div>`;
+    box.querySelector('#prenew').onclick = () => planBox(me, active, true);
+    return;
+  }
+  const chosen = sub.requested_plan || 'YEARLY';
+  box.innerHTML = `<form novalidate>
+      <fieldset style="border:0;padding:0;margin:0"><legend class="muted" style="margin-top:14px">Choose a plan</legend>
+      <div class="plans">${SITE.prices.map(([c, n, p, d]) => `<label class="plan"><input type="radio" name="plan" value="${c}"${c === chosen ? ' checked' : ''}>
+        <span class="plan-name"><span class="radio" aria-hidden="true"></span><span>${n}<br><span class="muted">${d}</span></span></span><b>${p}</b></label>`).join('')}</div></fieldset>
+      <p class="muted" style="margin-top:12px">GST included. No payment online yet: after you confirm, our team calls you to complete it by UPI.</p>
+      <div class="msg"></div>
+      <div class="btn-row"><button class="btn btn-primary" type="submit">Confirm plan</button>${picking ? '<button class="btn btn-ghost" type="button" id="pback">Back</button>' : ''}</div>
+    </form>`;
+  box.querySelector('#pback')?.addEventListener('click', () => planBox(me, active));
+  onSubmit(box.querySelector('form'), async (f) => {
+    const r = await api('/account/v1/me/plan-request', { method: 'POST', body: { plan: f.get('plan') } });
+    planBox(Object.assign(me, r), active);
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 }
 

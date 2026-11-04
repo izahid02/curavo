@@ -13,6 +13,8 @@ import { Empty, ErrorNote, timeAgo, when } from '../ui';
 
 const PLANS = [['MONTHLY', 'Monthly', 1], ['HALF_YEARLY', 'Half-yearly', 6], ['YEARLY', 'Yearly', 12], ['FOUNDING', 'Founding member', 12]];
 const PLAN_LABEL = Object.fromEntries(PLANS.map(([k, l]) => [k, l]));
+const PLAN_PRICE = { MONTHLY: '₹589', HALF_YEARLY: '₹2,899', YEARLY: '₹4,999' };
+const PLAN_MONTHS = Object.fromEntries(PLANS.map(([k, , n]) => [k, n]));
 
 function today() { return new Date().toISOString().slice(0, 10); }
 function addMonths(ymd, n) {
@@ -29,17 +31,19 @@ export default function Accounts() {
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null);
+  const [waitingOnly, setWaitingOnly] = useState(false);
 
   const load = () => api('/accounts').then(setRows).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
 
   const shown = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    return (rows || []).filter((a) => {
+    return (rows || []).filter((a) => !waitingOnly || a.requested_plan).filter((a) => {
       const hay = [a.email, a.name, a.shop_name, a.town, a.phone, ...a.shops.map((s) => s.shop_code)].join(' ').toLowerCase();
       return words.every((w) => hay.includes(w));
-    });
-  }, [rows, q]);
+    }).sort((a, b) => (b.requested_plan ? 1 : 0) - (a.requested_plan ? 1 : 0));   // waiting for payment first
+  }, [rows, q, waitingOnly]);
+  const waiting = (rows || []).filter((a) => a.requested_plan).length;
 
   return (
     <>
@@ -48,7 +52,12 @@ export default function Accounts() {
           <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em' }}>Accounts</h1>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Shop owners signed up on curavo.in. Set a subscription here until online payments exist.</div>
         </div>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search email, shop, town, code" style={{ width: 280, maxWidth: '100%' }} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className={waitingOnly ? 'btn-primary' : 'btn-secondary'} onClick={() => setWaitingOnly(!waitingOnly)}>
+            Waiting for payment ({waiting})
+          </button>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search email, shop, town, code" style={{ width: 280, maxWidth: '100%' }} />
+        </div>
       </header>
       <ErrorNote>{err}</ErrorNote>
 
@@ -84,6 +93,12 @@ export default function Accounts() {
                               ))}
                           </td>
                           <td>
+                            {a.requested_plan && (
+                              <div style={{ marginBottom: 4 }}>
+                                <span className="badge badge-warn">Wants {PLAN_LABEL[a.requested_plan] || a.requested_plan}</span>
+                                <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }} title={when(a.requested_at)}>chose {timeAgo(a.requested_at)}</div>
+                              </div>
+                            )}
                             {active
                               ? <><span className="badge badge-ok">Paid</span><div style={{ fontSize: 12.5, marginTop: 3 }}>{PLAN_LABEL[a.plan] || a.plan || ''} · until {fmt(a.paid_until)}</div></>
                               : a.paid_until
@@ -112,8 +127,10 @@ export default function Accounts() {
 }
 
 function SubscriptionEditor({ account, onSaved, onError }) {
-  const [plan, setPlan] = useState(account.plan || 'YEARLY');
-  const [until, setUntil] = useState(account.paid_until || '');
+  const [plan, setPlan] = useState(account.requested_plan || account.plan || 'YEARLY');
+  const base0 = account.paid_until && account.paid_until > today() ? account.paid_until : today();
+  // A waiting request comes pre-filled: check the payment arrived, then just press Save.
+  const [until, setUntil] = useState(account.requested_plan ? addMonths(base0, PLAN_MONTHS[account.requested_plan] || 12) : (account.paid_until || ''));
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState('');
   const [confirmDisable, setConfirmDisable] = useState(false);
@@ -134,6 +151,16 @@ function SubscriptionEditor({ account, onSaved, onError }) {
   }
 
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    {account.requested_plan && (
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', fontSize: 13.5 }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <b>Wants {PLAN_LABEL[account.requested_plan]} ({PLAN_PRICE[account.requested_plan] || ''})</b>, chose {timeAgo(account.requested_at)}.
+          {' '}Call <b style={{ userSelect: 'all' }}>{account.phone || 'no phone'}</b>, collect the payment, then press <b>Save subscription</b> below (already filled in).
+        </div>
+        <button className="btn-secondary" disabled={busy} onClick={() => save({ clear_request: true })}>Dismiss request</button>
+      </div>
+    )}
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 280 }}>
         <div className="lbl">Subscription</div>
@@ -171,6 +198,7 @@ function SubscriptionEditor({ account, onSaved, onError }) {
           <button className="btn-secondary" onClick={() => setConfirmDisable(true)} style={{ alignSelf: 'flex-start' }}>Disable account…</button>
         )}
       </div>
+    </div>
     </div>
   );
 }

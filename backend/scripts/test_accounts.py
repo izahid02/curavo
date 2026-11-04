@@ -18,6 +18,9 @@ What it holds the system to:
     verified email, is accepted.  The same email signed up with a password is
     the same account.
   * The profile (shop details) can be read and changed only by its owner.
+  * Choosing a plan (no online payment yet): needs shop name + phone, emails
+    ARZ and the owner once, shows as "waiting" in Curavo Control, and is
+    cleared when ARZ switches the plan on.
 """
 import os, re, shutil, sys
 from datetime import datetime, timedelta
@@ -31,6 +34,7 @@ os.environ["CURAVO_CLOUD_DATA"] = str(sandbox)
 os.environ["CURAVO_ADMIN_PASSWORD"] = "test-panel-password"
 os.environ["CURAVO_GOOGLE_CLIENT_IDS"] = "test-client.apps.googleusercontent.com"
 os.environ["CURAVO_SITE_URL"] = "https://curavo.test"
+os.environ["CURAVO_MAIL_REPLY_TO"] = "sales@arz.test"
 sys.path.insert(0, str(ROOT / "cloud" / "server"))
 
 from cryptography.hazmat.primitives import serialization               # noqa: E402
@@ -201,6 +205,41 @@ with TestClient(app) as c:
     check("curavo.in allowed", pre.headers.get("access-control-allow-origin"), "https://curavo.in")
     pre = c.options("/account/v1/login", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"})
     check("other sites not allowed", pre.headers.get("access-control-allow-origin"), None)
+
+    print("[8] Choose a plan; ARZ collects the payment by hand")
+    gtok = post("/login", {"email": "shop.owner@gmail.com", "password": "offline-pass1"}).json()["token"]   # [6] changed the password
+    H = {"Authorization": f"Bearer {gtok}"}
+    A = {"Authorization": "Bearer " + c.post("/admin/api/login", json={"username": "arz", "password": "test-panel-password"}).json()["token"]}
+    check("an unknown plan is refused", c.post("/account/v1/me/plan-request", headers=H, json={"plan": "FOUNDING"}).status_code, 400)
+    check("needs a sign-in", c.post("/account/v1/me/plan-request", json={"plan": "YEARLY"}).status_code, 401)
+    r = post("/signup", {"email": "nophone@example.com", "password": "medicine-123"})
+    c.post("/account/v1/verify", json={"token": last_link("verify")})
+    t2 = post("/login", {"email": "nophone@example.com", "password": "medicine-123"}).json()["token"]
+    check("refused without shop name + phone", c.post("/account/v1/me/plan-request",
+          headers={"Authorization": f"Bearer {t2}"}, json={"plan": "YEARLY"}).status_code, 400)
+    n = len(OUTBOX)
+    r = c.post("/account/v1/me/plan-request", headers=H, json={"plan": "YEARLY"})
+    check("request saved", (r.status_code, r.json()["subscription"]["requested_plan"]), (200, "YEARLY"))
+    mails = OUTBOX[n:]
+    check("ARZ hears about it, with the phone", [(m["to"], "9864012345" in m["body"]) for m in mails if m["to"] == "sales@arz.test"],
+          [("sales@arz.test", True)])
+    check("the owner gets a 'we will contact you' email",
+          any(m["to"] == "shop.owner@gmail.com" and "contact you soon" in m["body"] for m in mails), True)
+    n = len(OUTBOX)
+    c.post("/account/v1/me/plan-request", headers=H, json={"plan": "YEARLY"})
+    check("pressing it twice sends no second email", len(OUTBOX), n)
+    row = [a for a in c.get("/admin/api/accounts", headers=A).json() if a["email"] == "shop.owner@gmail.com"][0]
+    check("Curavo Control shows it waiting", row["requested_plan"], "YEARLY")
+    r = c.delete("/account/v1/me/plan-request", headers=H)
+    check("the owner can cancel it", r.json()["subscription"]["requested_plan"], None)
+    c.post("/account/v1/me/plan-request", headers=H, json={"plan": "MONTHLY"})
+    r = c.patch(f"/admin/api/accounts/{row['id']}", headers=A, json={"clear_request": True})
+    check("ARZ can dismiss it", r.json()["requested_plan"], None)
+    c.post("/account/v1/me/plan-request", headers=H, json={"plan": "HALF_YEARLY"})
+    r = c.patch(f"/admin/api/accounts/{row['id']}", headers=A, json={"plan": "HALF_YEARLY", "paid_until": "2027-05-04"})
+    check("switching the plan on clears the request", (r.json()["requested_plan"], r.json()["paid_until"]), (None, "2027-05-04"))
+    check("...and the owner sees it active", me(gtok).json()["subscription"], 
+          {"plan": "HALF_YEARLY", "paid_until": "2027-05-04", "requested_plan": None, "requested_at": None})
 
 shutil.rmtree(sandbox, ignore_errors=True)
 print("\n" + "=" * 58)

@@ -151,7 +151,9 @@ def _profile(acc: Account) -> dict:
             "has_password": bool(acc.password_hash), "google": bool(acc.google_sub),
             "shop": {"name": acc.shop_name or "", "phone": acc.phone or "", "town": acc.town or "",
                      "gstin": acc.gstin or ""},
-            "subscription": {"plan": acc.plan, "paid_until": acc.paid_until}}
+            "subscription": {"plan": acc.plan, "paid_until": acc.paid_until,
+                             "requested_plan": acc.requested_plan,
+                             "requested_at": acc.requested_at.isoformat() + "Z" if acc.requested_at else None}}
 
 
 def _signed_in(db, acc: Account) -> dict:
@@ -368,3 +370,57 @@ def change_password(body: PasswordIn, acc: Account = Depends(current_account), d
     acc.session_version = (acc.session_version or 1) + 1
     db.commit()
     return {"token": make_session(acc), "account": _profile(acc)}
+
+
+# --------------------------------------------------------------- choose a plan
+# No online payment yet: the owner chooses a plan, ARZ phones them, collects
+# the money by hand and switches the plan on in Curavo Control.
+
+PLAN_NAMES = {"MONTHLY": ("Monthly", "Rs 589"), "HALF_YEARLY": ("Half-yearly", "Rs 2,899"),
+              "YEARLY": ("Yearly", "Rs 4,999")}
+
+
+class PlanRequestIn(BaseModel):
+    plan: str = Field(..., max_length=20)
+
+
+@router.post("/me/plan-request")
+def request_plan(body: PlanRequestIn, acc: Account = Depends(current_account), db: Session = Depends(get_db)):
+    if body.plan not in PLAN_NAMES:
+        raise HTTPException(status_code=400, detail="Please choose one of the plans.")
+    if not (acc.shop_name and acc.phone):
+        raise HTTPException(status_code=400, detail="Please fill in your shop name and phone number "
+                                                    "under 'Your shop' first, so our team can reach you.")
+    now = datetime.utcnow()
+    repeat = (acc.requested_plan == body.plan and acc.requested_at
+              and now - acc.requested_at < timedelta(hours=1))
+    acc.requested_plan = body.plan
+    acc.requested_at = now
+    db.commit()
+    if not repeat:                       # pressing it twice sends no second round of emails
+        name, price = PLAN_NAMES[body.plan]
+        if settings.sales_email:
+            mailer.send(settings.sales_email, f"Curavo plan request: {name} - {acc.shop_name}",
+                        f"A shop chose a plan on curavo.in. Please call them to collect the payment, "
+                        f"then switch it on in Curavo Control > Accounts.\n\n"
+                        f"Plan:   {name} ({price}, GST included)\n"
+                        f"Shop:   {acc.shop_name}{(', ' + acc.town) if acc.town else ''}\n"
+                        f"Phone:  {acc.phone}\n"
+                        f"Name:   {acc.name or '-'}\n"
+                        f"Email:  {acc.email}\n"
+                        f"GSTIN:  {acc.gstin or '-'}\n")
+        mailer.send(acc.email, f"We got your request for Curavo {name}",
+                    f"Hello{(' ' + acc.name) if acc.name else ''},\n\n"
+                    f"Thank you for choosing Curavo {name} ({price}, GST included) for {acc.shop_name}.\n\n"
+                    f"Our team will contact you soon on {acc.phone} to complete the payment. "
+                    f"As soon as it is done, your subscription is switched on and reaches your shop PC "
+                    f"by itself - nothing to copy or type.\n\n- Curavo, by ARZ Solutions")
+    return _profile(acc)
+
+
+@router.delete("/me/plan-request")
+def cancel_plan_request(acc: Account = Depends(current_account), db: Session = Depends(get_db)):
+    acc.requested_plan = None
+    acc.requested_at = None
+    db.commit()
+    return _profile(acc)

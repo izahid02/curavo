@@ -47,6 +47,8 @@ def _seed_admin():
 _ADDED_COLUMNS = [
     ("shops", "pilot", "BOOLEAN NOT NULL DEFAULT 0"),
     ("shops", "account_id", "INTEGER"),          # the owner's Curavo account
+    ("accounts", "requested_plan", "VARCHAR(20)"),
+    ("accounts", "requested_at", "DATETIME"),
 ]
 
 
@@ -83,7 +85,7 @@ app.include_router(device_link.router)
 # The website also signs owners in and shows "My account", so it may send the
 # Authorization header and use GET/PATCH too.
 app.add_middleware(CORSMiddleware, allow_origins=settings.site_origins,
-                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "Authorization"])
+                   allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type", "Authorization"])
 
 
 @app.get("/health")
