@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from curavo_cloud.config import settings
 from curavo_cloud.db import Base, SessionLocal, engine
 from curavo_cloud.models import AdminUser
-from curavo_cloud.routers import admin, agent, leads, owner, updates
+from curavo_cloud.routers import accounts, admin, agent, leads, owner, updates
 from curavo_cloud.security import hash_password
 
 PANEL_DIST = Path(__file__).resolve().parents[2] / "admin" / "dist"
@@ -46,6 +46,7 @@ def _seed_admin():
 # (Same idea as the desktop app's migration ledger, kept tiny on purpose.)
 _ADDED_COLUMNS = [
     ("shops", "pilot", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("shops", "account_id", "INTEGER"),          # the owner's Curavo account
 ]
 
 
@@ -73,12 +74,15 @@ app.include_router(admin.router)
 app.include_router(updates.router)
 app.include_router(leads.router)
 app.include_router(owner.router)
+app.include_router(accounts.router)
 
 # Only the Curavo website may send the demo form from a browser.  (Shop PCs and
 # the panel are not affected: the PCs do not use a browser, and the panel is
 # served from this same server.)
+# The website also signs owners in and shows "My account", so it may send the
+# Authorization header and use GET/PATCH too.
 app.add_middleware(CORSMiddleware, allow_origins=settings.site_origins,
-                   allow_methods=["POST"], allow_headers=["Content-Type"])
+                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "Authorization"])
 
 
 @app.get("/health")
@@ -92,7 +96,7 @@ if PANEL_DIST.exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def panel(path: str):
-        if path.startswith(("admin/api", "agent/", "updates/", "download/", "public/", "mobile/")):
+        if path.startswith(("admin/api", "agent/", "updates/", "download/", "public/", "mobile/", "account/")):
             from fastapi import HTTPException
             raise HTTPException(status_code=404)
         f = (PANEL_DIST / path).resolve()

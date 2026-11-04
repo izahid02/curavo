@@ -38,6 +38,7 @@ class Shop(Base):
     # Two different PCs reporting under one shop code within a day = a copied
     # install (or a second counter PC - Curavo is single-PC for now).
     machine_conflict_at = Column(DateTime)
+    account_id      = Column(Integer, ForeignKey("accounts.id"), index=True)   # the owner's Curavo account
     other_machine_fp    = Column(String(64))
 
     licence_state   = Column(String(10))      # TRIAL / ACTIVE / GRACE / EXPIRED
@@ -218,3 +219,48 @@ class OwnerSummary(Base):
     locked     = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=utcnow)
     size       = Column(Integer)
+
+
+class Account(Base):
+    """
+    A customer's Curavo account: the shop OWNER, who signs in on the website,
+    the shop PC and the phone with email + password or Google.  (The shop's
+    staff never have one - they keep their simple logins on the PC.)
+    """
+    __tablename__ = "accounts"
+
+    id              = Column(Integer, primary_key=True)
+    email           = Column(String(254), unique=True, nullable=False, index=True)   # always lower-case
+    name            = Column(String(120))
+    password_hash   = Column(String(100))            # NULL for a Google-only account
+    google_sub      = Column(String(64), unique=True)  # Google's id for the person
+    email_verified  = Column(Boolean, default=False, nullable=False)
+    created_at      = Column(DateTime, default=utcnow)
+    last_login_at   = Column(DateTime)
+    disabled        = Column(Boolean, default=False, nullable=False)
+    # Bumped on a password reset: every older sign-in stops working.
+    session_version = Column(Integer, default=1, nullable=False)
+    failed_logins   = Column(Integer, default=0, nullable=False)
+    locked_until    = Column(DateTime)
+    # The shop, as typed on the website (the PC's own Pharmacy Settings stay
+    # the source for invoices).
+    shop_name       = Column(String(150))
+    phone           = Column(String(20))
+    town            = Column(String(80))
+    gstin           = Column(String(20))
+    # The subscription (filled by payments; ARZ can also set it in the panel).
+    plan            = Column(String(20))             # MONTHLY / HALF_YEARLY / YEARLY / FOUNDING
+    paid_until      = Column(String(10))             # YYYY-MM-DD
+
+
+class AccountToken(Base):
+    """A one-time link sent by email: verify the address, or reset the password."""
+    __tablename__ = "account_tokens"
+
+    id         = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), index=True, nullable=False)
+    purpose    = Column(String(10), nullable=False)          # VERIFY / RESET
+    token_hash = Column(String(64), unique=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used_at    = Column(DateTime)

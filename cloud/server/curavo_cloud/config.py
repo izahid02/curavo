@@ -21,6 +21,15 @@ Settings for the Curavo cloud server, read from environment variables.
   CURAVO_SITE_ORIGINS      the website addresses allowed to send the demo form,
                            comma-separated.  Default: curavo.in and curavo.com
                            (with and without www).
+  CURAVO_SITE_URL          the website, used in links inside emails
+                           (default https://curavo.in)
+  CURAVO_GOOGLE_CLIENT_IDS the "Sign in with Google" client id(s) from Google's
+                           console, comma-separated.  Unset = Google sign-in off.
+  CURAVO_MAIL_FROM         sender of account emails, e.g.
+                           "Curavo <no-reply@curavo.in>"
+  CURAVO_SMTP_HOST/PORT/USER/PASSWORD
+                           the email-sending service.  Unset = emails are
+                           written to <data>/outbox/ instead of sent (testing).
 """
 import os
 import secrets
@@ -46,15 +55,24 @@ class Settings:
             "CURAVO_SITE_ORIGINS",
             "https://curavo.in,https://www.curavo.in,https://curavo.com,https://www.curavo.com",
         ).split(",") if o.strip()]
+        self.site_url = os.environ.get("CURAVO_SITE_URL", "https://curavo.in").rstrip("/")
+        self.google_client_ids = [c.strip() for c in os.environ.get("CURAVO_GOOGLE_CLIENT_IDS", "").split(",") if c.strip()]
+        self.mail_from = os.environ.get("CURAVO_MAIL_FROM", "Curavo <no-reply@curavo.in>")
+        self.smtp_host = os.environ.get("CURAVO_SMTP_HOST", "")
+        self.smtp_port = int(os.environ.get("CURAVO_SMTP_PORT", "587"))
+        self.smtp_user = os.environ.get("CURAVO_SMTP_USER", "")
+        self.smtp_password = os.environ.get("CURAVO_SMTP_PASSWORD", "")
+        self.outbox_dir = self.data_dir / "outbox"
         self.secret = self._secret()
+        self.account_secret = self._secret("account_secret.txt")
 
-    def _secret(self) -> str:
+    def _secret(self, name: str = "panel_secret.txt") -> str:
         """
-        Signs control-panel logins.  Made once and kept in the data folder, so
-        it is never in the code and survives restarts (a new one would log
-        everybody out).
+        A signing secret (panel logins; customer account sessions use their
+        own).  Made once and kept in the data folder, so it is never in the
+        code and survives restarts (a new one would log everybody out).
         """
-        path = self.data_dir / "panel_secret.txt"
+        path = self.data_dir / name
         if not path.exists():
             path.write_text(secrets.token_urlsafe(48))
             try:
