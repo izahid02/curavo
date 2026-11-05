@@ -307,3 +307,44 @@ class IssuedKey(Base):
     plan       = Column(String(20))
     key        = Column(Text, nullable=False)
     issued_at  = Column(DateTime, default=utcnow)
+
+
+class PhoneRequest(Base):
+    """
+    "Connect this phone" after the owner signed in on the phone with their
+    Curavo account (decided 4 Nov; replaces scanning a QR).  The shop PC shows
+    Allow / Refuse with a 6-digit check code made from the phone's key, so the
+    owner sees it is really their phone - the cloud cannot slip in its own key.
+    """
+    __tablename__ = "phone_requests"
+
+    id          = Column(Integer, primary_key=True)
+    request_id  = Column(String(24), unique=True, nullable=False)
+    shop_id     = Column(Integer, ForeignKey("shops.id"), index=True, nullable=False)
+    account_id  = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    device_id   = Column(String(40), nullable=False)
+    name        = Column(String(80))
+    public_key  = Column(String(64), nullable=False)
+    status      = Column(String(10), default="PENDING", nullable=False)   # PENDING/APPROVED/REFUSED/EXPIRED
+    reason      = Column(Text)
+    created_at  = Column(DateTime, default=utcnow)
+    expires_at  = Column(DateTime, nullable=False)
+    decided_at  = Column(DateTime)
+
+
+class PhoneSignIn(Base):
+    """
+    "Continue with Google" on the phone: the app shows a code and opens
+    curavo.in/link?code=..., where the owner signs in (Google works there) and
+    presses Allow.  Only the phone that started it holds the poll secret, so
+    only it receives the sign-in.
+    """
+    __tablename__ = "phone_sign_ins"
+
+    id          = Column(Integer, primary_key=True)
+    code        = Column(String(8), unique=True, nullable=False)
+    poll_hash   = Column(String(64), nullable=False)
+    account_id  = Column(Integer, ForeignKey("accounts.id"))
+    status      = Column(String(10), default="PENDING", nullable=False)   # PENDING/APPROVED/REFUSED/USED/EXPIRED
+    created_at  = Column(DateTime, default=utcnow)
+    expires_at  = Column(DateTime, nullable=False)

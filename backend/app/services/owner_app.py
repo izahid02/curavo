@@ -133,6 +133,39 @@ def pairing_proof(secret_b64: str, device_pub_b64: str, pairing_id: str) -> str:
     return hmac.new(_unb64(secret_b64), msg, hashlib.sha256).hexdigest()
 
 
+CHECK_CONTEXT = b"curavo-phone-check-v1:"
+
+
+def check_code(public_key_b64: str) -> str:
+    """
+    6 digits made from a phone's public key.  The phone shows the same digits
+    (mobile/src/lockbox.js checkCode); the owner compares them before pressing
+    Allow, so a key swapped on the way (by anyone, the cloud included) shows up
+    as a different number.
+    """
+    n = int.from_bytes(hashlib.sha256(CHECK_CONTEXT + public_key_b64.encode("ascii")).digest()[:4], "big")
+    d = f"{n % 1_000_000:06d}"
+    return f"{d[:3]} {d[3:]}"
+
+
+def accept_phone(db: Session, request: dict) -> tuple[bool, str]:
+    """The owner pressed Allow for a phone that signed in with the shop's Curavo account."""
+    try:
+        pub = request["public_key"]
+        if len(_unb64(pub)) != 32:
+            raise ValueError
+    except Exception:
+        return False, "The phone sent an invalid key."
+    if db.query(OwnerDevice).filter(OwnerDevice.device_id == request["device_id"]).first():
+        return True, "Connected."
+    if db.query(OwnerDevice).count() >= MAX_PHONES:
+        return False, f"At most {MAX_PHONES} phones can be connected. Remove one first."
+    db.add(OwnerDevice(device_id=request["device_id"], name=(request.get("name") or "Phone")[:80],
+                       public_key=pub, added_at=datetime.utcnow()))
+    db.commit()
+    return True, "Connected."
+
+
 def new_pairing(db: Session) -> OwnerPairing:
     now = datetime.utcnow()
     # Old codes are useless; tidy them away.

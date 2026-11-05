@@ -333,7 +333,7 @@ function signInScreen(message) {
   app.innerHTML = `
   <div class="narrow"><div class="card">
     <h1>Sign in to Curavo</h1>
-    <p class="sub">${load(AFTER_KEY)?.startsWith('/link') ? 'Sign in to connect your shop PC.' : planOf(load(PLAN_KEY)) ? `Sign in to continue with the ${esc(planOf(load(PLAN_KEY))[1])} plan.` : 'Your shop, subscription and download.'}</p>
+    <p class="sub">${load(AFTER_KEY)?.startsWith('/link') ? 'Sign in to answer the request from your shop PC or phone.' : planOf(load(PLAN_KEY)) ? `Sign in to continue with the ${esc(planOf(load(PLAN_KEY))[1])} plan.` : 'Your shop, subscription and download.'}</p>
     ${message || ''}
     <div id="gbtn"></div>
     <div class="or">or with email</div>
@@ -443,6 +443,37 @@ function resetScreen(tok) {
   });
 }
 
+// The Curavo Owner app on a phone asks to sign in with this account ("Continue with Google" there).
+function phoneLinkScreen(code) {
+  app.innerHTML = `
+  <div class="narrow"><div class="card">
+    <h1>Sign in on the Curavo Owner app?</h1>
+    <p class="sub">The owner app on your phone wants to sign in with your Curavo account (${esc(ME?.email || 'this account')}).</p>
+    <p class="muted">Check the code matches the one on the phone:</p>
+    <p><span class="code">${esc(code.toUpperCase())}</span></p>
+    <div class="msg"></div>
+    <div class="row" style="margin-top:18px">
+      <button class="btn btn-primary" id="allow">Yes, sign in the app</button>
+      <button class="btn btn-ghost" id="deny">Don't allow</button>
+    </div>
+    <p class="muted" style="margin-top:16px">If you did not just start this on your phone, choose Don't allow.</p>
+  </div></div>`;
+  const decide = async (allow) => {
+    app.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try {
+      await api('/account/v1/link/' + encodeURIComponent(code), { method: 'POST', body: { allow } });
+      app.innerHTML = allow
+        ? `<div class="narrow"><div class="card"><h1>Signed in ✓</h1><p class="sub">Go back to the Curavo Owner app - it continues by itself.</p></div></div>`
+        : `<div class="narrow"><div class="card"><h1>Not allowed</h1><p class="sub">The app was not signed in.</p></div></div>`;
+    } catch (err) {
+      app.querySelector('.msg').innerHTML = note('err', err.message);
+      app.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    }
+  };
+  document.getElementById('allow').onclick = () => decide(true);
+  document.getElementById('deny').onclick = () => decide(false);
+}
+
 async function linkScreen(code) {
   if (!code) { app.innerHTML = `<div class="narrow"><div class="card"><h1>No code</h1><p class="sub">Open this page from the Curavo app on the shop PC.</p></div></div>`; return; }
   if (!token) { store(AFTER_KEY, '/link?code=' + encodeURIComponent(code)); signInScreen(); return; }
@@ -456,6 +487,7 @@ async function linkScreen(code) {
   }
   const isLogin = d.purpose === 'LOGIN';
   const name = d.shop_name || 'your shop';
+  if (d.purpose === 'PHONE') return phoneLinkScreen(code);
   if (d.linked_to_other_account) {
     app.innerHTML = `<div class="narrow"><div class="card"><h1>This PC belongs to another account</h1>
       ${note('warn', `${name} (shop code ${d.shop_code}) is linked to a different Curavo account. If it should be yours, contact ARZ Solutions.`)}

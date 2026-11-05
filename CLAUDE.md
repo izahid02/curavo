@@ -797,7 +797,17 @@ Current stock of a product = SUM(quantity_available) across
   -> ChaCha20-Poly1305, aad = device id).  The phone's half is
   mobile/src/lockbox.js; the two must match byte for byte, and
   test_owner_app.py runs the phone's real code under Node to prove it.
-  CONNECTING: the PC shows a QR {cloud, shop code, pairing id, SECRET}.  The
+  CONNECTING BY SIGNING IN (the usual way, Nov 2026): the phone signs in with
+  the shop's Curavo account (email + password, or Google through curavo.in/link
+  - only the phone holding the poll secret receives that sign-in), picks the
+  shop, and sends its public key.  The PC (Owner/Admin, any screen, asked every
+  30 s) shows Allow / Refuse with a 6-digit CHECK CODE made from that key
+  (sha256("curavo-phone-check-v1:" + key)); the phone shows the same digits.
+  The owner compares them: a key swapped on the way - by anyone, the cloud
+  included - shows a different number.  owner_app.check_code (PC),
+  phone_connect.check_code (cloud) and lockbox.js checkCode (phone) must agree;
+  test_phone_connect.py runs all three.  Only Allow on the PC adds the phone.
+  CONNECTING BY QR (fallback): the PC shows a QR {cloud, shop code, pairing id, SECRET}.  The
   phone sends the cloud its public key + HMAC(secret, key + id); the PC fetches
   that claim, checks the proof, and only then approves.  The cloud never sees
   the secret.  Codes last 10 minutes and work once.  At most 5 phones.
@@ -808,7 +818,7 @@ Current stock of a product = SUM(quantity_available) across
   IST) carries COUNTS ONLY, never money - it passes through Expo and Google
   readable.  Never add a money figure or a patient name to push_text().
   The app is mobile/ (Expo, Android APK first; see mobile/README.md).
-  Guard: backend/scripts/test_owner_app.py
+  Guard: backend/scripts/test_owner_app.py, test_phone_connect.py
 
 ---
 
@@ -1018,6 +1028,12 @@ GET    /api/owner-app/pairings/{id} → OPEN / DONE / FAILED / EXPIRED; the scre
                                       polls every 2 s - this is where the phone's
                                       proof is checked.
 DELETE /api/owner-app/devices/{id}  → remove a phone (here and at the cloud)
+GET    /api/owner-app/phone-requests → phones that signed in with the shop's
+                                      Curavo account and wait for Allow, each
+                                      with its check_code.  [] for staff and when
+                                      the cloud is off; cached 20 s.
+POST   /api/owner-app/phone-requests/{id} → {allow}.  Owner/Admin; 402 when
+                                      restricted, 400 at 5 phones.
 
 ### Licence (Curavo subscription)
 GET    /api/licence/status          → state TRIAL|ACTIVE|GRACE|EXPIRED, restricted,

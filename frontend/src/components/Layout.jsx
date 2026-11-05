@@ -8,7 +8,7 @@ import { clearBrandingCache, loadBrandingImage } from '../lib/branding';
 import Icon from './shared/Icon';
 import { LicenceBanner, LicencePill, LicenceProvider, useLicence } from '../lib/licence.jsx';
 import { UpdateBanner } from '../lib/updater.jsx';
-import { OwnerAppModal } from '../lib/ownerApp.jsx';
+import { OwnerAppModal, PhoneRequestWatcher } from '../lib/ownerApp.jsx';
 import { CuravoAccountModal } from '../lib/curavoAccount.jsx';
 /** Roles allowed to open Pharmacy Settings.  Must match _SETTINGS_ADMIN_ROLES
  *  in backend/app/routers/settings.py — the backend enforces it either way. */
@@ -1069,6 +1069,9 @@ export default function Layout() {
 
       {/* ══ OWNER APP ON PHONE ═══════════════════════════════════════ */}
       {showOwnerApp && <OwnerAppModal onClose={() => setShowOwnerApp(false)} />}
+
+      {/* A phone signed in with the shop's Curavo account and waits for Allow (owner/admin only). */}
+      {PHARMACY_SETTINGS_ROLES.includes(profile?.role || user?.role_name) && <PhoneRequestWatcher />}
 
       {/* ══ CHANGE PASSWORD MODAL ════════════════════════════════════ */}
       {showChangePassword && (

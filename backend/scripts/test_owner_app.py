@@ -177,7 +177,9 @@ with TestClient(cloud_app) as cloud, TestClient(shop_app, raise_server_exception
     check("cloud takes the claim", bad.scan(r["qr"], proof="00" * 32).status_code, 201)
     check("PC refuses the wrong proof", shop.get(f"/api/owner-app/pairings/{r['pairing_id']}", headers=H).json()["status"], "FAILED")
 
-    check("intruder is locked out", bad.status().status_code, 401)
+    # A refused phone may still ask why (status says REMOVED) - but it gets nothing else.
+    check("intruder is told it was refused", bad.status().json()["status"], "REMOVED")
+    check("intruder is locked out of the figures", bad.summary().status_code, 401)
 
     print("[4] The summary: locked at the cloud, open on the phone")
     agent.run_once()

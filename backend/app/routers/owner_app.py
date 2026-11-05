@@ -9,6 +9,10 @@ The owner app, from the shop PC's side (account menu -> Owner app on phone).
                                            while the QR is shown; it checks the
                                            scanning phone's proof and connects it
   DELETE /api/owner-app/devices/{id}       remove a phone (Owner/Admin)
+  GET    /api/owner-app/phone-requests     phones that signed in with the shop's
+                                           Curavo account and wait for Allow
+                                           (Owner/Admin; the screens ask every 30 s)
+  POST   /api/owner-app/phone-requests/{id}   {allow}: let it in, or refuse
 
 The rules and the locking live in services/owner_app.py; talking to the cloud
 goes through services/cloud_agent.py.
@@ -16,6 +20,7 @@ goes through services/cloud_agent.py.
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -112,3 +117,67 @@ def remove_device(device_id: str, db: Session = Depends(get_db), user: User = De
     except CloudError:
         pass   # it is gone here, so nothing new is locked for it either way
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Phones that signed in with the shop's Curavo account (no QR needed)
+# ---------------------------------------------------------------------------
+# Every Owner/Admin screen asks every 30 s; the answer is kept for 20 s so a
+# PC with several windows open does not ask the cloud more often than that.
+_REQ_CACHE = {"at": 0.0, "list": []}
+_REQ_SECONDS = 20
+
+
+def _phone_requests(force=False) -> list:
+    import time
+    if not agent.enabled:
+        return []
+    if force or time.monotonic() - _REQ_CACHE["at"] > _REQ_SECONDS:
+        try:
+            _REQ_CACHE["list"] = (agent.owner_call("GET", "/agent/v1/phone-requests") or {}).get("requests") or []
+        except CloudError:
+            pass                                  # keep the last answer; try again later
+        _REQ_CACHE["at"] = time.monotonic()
+    return _REQ_CACHE["list"]
+
+
+@router.get("/phone-requests")
+def phone_requests(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if user.role.name not in _OWNER_ROLES:
+        return {"requests": []}                   # only the owner/admin is asked
+    return {"requests": [{"request_id": r["request_id"], "name": r.get("name") or "Phone",
+                          "account_email": r.get("account_email") or "", "created_at": r.get("created_at"),
+                          "check_code": owner_app.check_code(r["public_key"])}
+                         for r in _phone_requests() if r.get("public_key")]}
+
+
+class PhoneDecisionIn(BaseModel):
+    allow: bool
+
+
+@router.post("/phone-requests/{request_id}")
+def decide_phone(request_id: str, body: PhoneDecisionIn, db: Session = Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    _require_owner(user)
+    r = next((x for x in _phone_requests(force=True) if x.get("request_id") == request_id), None)
+    if r is None:
+        raise HTTPException(status_code=404, detail="This phone is no longer waiting. Ask it to try again.")
+    ok, reason = False, "Refused on the shop PC."
+    if body.allow:
+        if licence.is_restricted(db):
+            raise HTTPException(status_code=402, detail=licence.RESTRICTED_MESSAGE)
+        ok, reason = owner_app.accept_phone(db, r)
+        if not ok:
+            raise HTTPException(status_code=400, detail=reason)
+    try:
+        agent.owner_call("POST", f"/agent/v1/phone-requests/{request_id}/decision", {"allow": ok, "reason": "" if ok else reason})
+    except CloudError as e:
+        if ok:
+            # Added here already: the first summary locked for it tells the cloud anyway (self-healing).
+            agent.run_in_background()
+            return {"ok": True, "status": "APPROVED", "note": str(e)}
+        raise HTTPException(status_code=503, detail=str(e))
+    _REQ_CACHE["list"] = [x for x in _REQ_CACHE["list"] if x.get("request_id") != request_id]
+    if ok:
+        agent.run_in_background()                 # the phone gets its first figures straight away
+    return {"ok": True, "status": "APPROVED" if ok else "REFUSED"}

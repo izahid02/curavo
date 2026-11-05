@@ -111,3 +111,15 @@ export function unlockSummary(locked, deviceId, privateKeyB64) {
   const body = chacha20poly1305(dataKey, fromB64(locked.nonce), SUMMARY_AAD).decrypt(fromB64(locked.ct));
   return JSON.parse(fromUtf8(body));
 }
+
+/**
+ * 6 digits made from this phone's public key, e.g. "482 913".  The shop PC
+ * shows the same digits next to Allow (owner_app.check_code on the PC); if
+ * they differ, the key was swapped on the way and the owner must refuse.
+ */
+export function checkCode(publicKeyB64) {
+  const d = sha256(utf8('curavo-phone-check-v1:' + publicKeyB64));
+  const n = ((d[0] << 24) >>> 0) + (d[1] << 16) + (d[2] << 8) + d[3];
+  const six = String(n % 1000000).padStart(6, '0');
+  return six.slice(0, 3) + ' ' + six.slice(3);
+}

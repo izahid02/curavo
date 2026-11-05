@@ -170,23 +170,38 @@ def phone_pair(body: PairIn, db: Session = Depends(get_db)):
     return {"device_id": device_id, "device_token": token, "shop_name": shop.shop_name}
 
 
-def current_phone(x_device_id: str = Header(default=""), authorization: str = Header(default=""),
-                  db: Session = Depends(get_db)) -> MobileDevice:
+def _phone(x_device_id: str, authorization: str, db) -> MobileDevice:
     token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
     dev = db.query(MobileDevice).filter(MobileDevice.device_id == x_device_id).first()
     if dev is None or not token or not secrets.compare_digest(dev.token_hash, hash_token(token)):
         raise HTTPException(status_code=401, detail="This phone is not connected.")
+    return dev
+
+
+def phone_any_status(x_device_id: str = Header(default=""), authorization: str = Header(default=""),
+                     db: Session = Depends(get_db)) -> MobileDevice:
+    """For /status only: a refused phone may still ask why."""
+    return _phone(x_device_id, authorization, db)
+
+
+def current_phone(x_device_id: str = Header(default=""), authorization: str = Header(default=""),
+                  db: Session = Depends(get_db)) -> MobileDevice:
+    dev = _phone(x_device_id, authorization, db)
     if dev.status == "REMOVED":
         raise HTTPException(status_code=401, detail="This phone was disconnected from the shop.")
     return dev
 
 
 @router.get("/mobile/v1/status")
-def phone_status(dev: MobileDevice = Depends(current_phone), db: Session = Depends(get_db)):
+def phone_status(dev: MobileDevice = Depends(phone_any_status), db: Session = Depends(get_db)):
     shop = db.get(Shop, dev.shop_id)
     p = db.query(OwnerPairingCloud).filter(OwnerPairingCloud.claim_json.contains(dev.device_id)).first()
-    return {"status": dev.status, "shop_name": shop.shop_name if shop else "",
-            "reason": p.reason if p is not None and p.status == "REJECTED" else None}
+    from curavo_cloud.routers.phone_connect import refused_reason
+    reason = p.reason if p is not None and p.status == "REJECTED" else refused_reason(db, dev.device_id)
+    if dev.status == "PENDING" and reason:          # the PC's answer is no, or nobody answered in time
+        dev.status = "REMOVED"
+        db.commit()
+    return {"status": dev.status, "shop_name": shop.shop_name if shop else "", "reason": reason}
 
 
 @router.get("/mobile/v1/summary")

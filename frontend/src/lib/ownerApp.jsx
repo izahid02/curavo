@@ -209,9 +209,15 @@ export function OwnerAppModal({ onClose }) {
             ) : full ? (
               <Note tone="info">At most {info.max_phones} phones can be connected. Remove one to add another.</Note>
             ) : (
-              <button className="btn-primary" disabled={busy} onClick={startPairing} style={{ width: '100%' }}>
-                {busy ? 'Making a code…' : (phase === 'failed' ? 'Try again' : 'Connect a phone')}
-              </button>
+              <>
+                <Note tone="info">
+                  <b>Easiest:</b> on the phone, open the Curavo Owner app and sign in with your Curavo account.
+                  This PC then asks you to <b>Allow</b> it. Or connect with a code:
+                </Note>
+                <button className="btn-primary" disabled={busy} onClick={startPairing} style={{ width: '100%' }}>
+                  {busy ? 'Making a code…' : (phase === 'failed' ? 'Try again' : 'Connect with a QR code')}
+                </button>
+              </>
             )}
           </>
         )}
@@ -247,3 +253,89 @@ const card = {
   border: '1px solid rgba(255,255,255,0.75)', borderRadius: 18,
   boxShadow: '0 20px 60px rgba(0,0,0,0.2)', padding: 24, boxSizing: 'border-box',
 };
+
+
+/**
+ * A phone that signed in with this shop's Curavo account asks to connect.
+ * Mounted once in Layout for the Owner/Administrator: asks the backend every
+ * 30 seconds and, when a phone is waiting, shows Allow / Refuse with the
+ * 6-digit check code - the same digits the phone shows.  If they differ,
+ * something swapped the phone's key on the way: refuse.
+ */
+const WATCH_MS = 30000;
+
+export function PhoneRequestWatcher() {
+  const [reqs, setReqs] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+  const [later, setLater] = useState(() => new Set());   // "Not now" - asked again after it times out
+
+  const load = useCallback(() => (
+    api.get('/owner-app/phone-requests').then(({ data }) => setReqs(data.requests || [])).catch(() => {})
+  ), []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, WATCH_MS);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const r = reqs.find((x) => !later.has(x.request_id));
+  if (done) {
+    return createPortal(
+      <div style={backdrop}><div style={card} role="dialog" aria-modal="true" aria-label="Phone connected">
+        <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Phone connected</div>
+        <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginBottom: 16 }}>{done}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn-primary" onClick={() => setDone('')}>OK</button>
+        </div>
+      </div></div>, document.body);
+  }
+  if (!r) return null;
+
+  async function answer(allow) {
+    setBusy(true); setError('');
+    try {
+      await api.post(`/owner-app/phone-requests/${r.request_id}`, { allow });
+      setReqs((list) => list.filter((x) => x.request_id !== r.request_id));
+      if (allow) setDone(`"${r.name}" can now see the shop's figures. The first ones arrive within a minute.`);
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Could not reach the Curavo cloud. Try again.');
+    } finally { setBusy(false); }
+  }
+
+  return createPortal(
+    <div style={backdrop}>
+      <div style={card} role="dialog" aria-modal="true" aria-labelledby="phone-req-title">
+        <div id="phone-req-title" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+          A phone wants to connect
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+          <b style={{ color: 'var(--text)' }}>{r.name}</b> signed in to the Curavo Owner app
+          {r.account_email ? <> as <b style={{ color: 'var(--text)' }}>{r.account_email}</b></> : ''}.
+          If you allow it, it can see this shop&apos;s sales, stock and patient credit.
+        </div>
+        <div style={{ background: 'rgba(99,102,241,0.08)', borderRadius: 12, padding: '14px 16px', textAlign: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-hint)' }}>
+            Check code
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: '0.12em', color: 'var(--accent-dark)', fontVariantNumeric: 'tabular-nums' }}>
+            {r.check_code}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>The phone must show exactly the same number.</div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 14 }}>
+          Not your phone, or a different number? Press <b>Refuse</b>.
+        </div>
+        {error && <Note tone="danger">{error}</Note>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="btn-secondary" disabled={busy} onClick={() => setLater((s0) => new Set([...s0, r.request_id]))}>Not now</button>
+          <button className="btn-danger" disabled={busy} onClick={() => answer(false)}>Refuse</button>
+          <button className="btn-primary" disabled={busy} onClick={() => answer(true)}>{busy ? 'Connecting…' : 'Allow'}</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

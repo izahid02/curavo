@@ -100,6 +100,10 @@ def _pending(db, code: str) -> DeviceLink:
 
 @router.get("/account/v1/link/{code}")
 def describe(code: str, acc: Account = Depends(current_account), db: Session = Depends(get_db)):
+    from curavo_cloud.routers.phone_connect import describe_phone_code
+    if describe_phone_code(db, code) is not None:          # the owner app asking to sign in
+        return {"purpose": "PHONE", "shop_name": "", "shop_code": "", "already_yours": True,
+                "linked_to_other_account": False}
     link = _pending(db, code)
     shop = db.get(Shop, link.shop_id)
     other = shop.account_id and shop.account_id != acc.id
@@ -113,6 +117,15 @@ class DecideIn(BaseModel):
 
 @router.post("/account/v1/link/{code}")
 def decide(code: str, body: DecideIn, acc: Account = Depends(current_account), db: Session = Depends(get_db)):
+    from curavo_cloud.routers.phone_connect import describe_phone_code
+    phone = describe_phone_code(db, code)
+    if phone is not None:                                  # sign the owner app in with this account
+        if not acc.email_verified:
+            raise HTTPException(status_code=403, detail="Please confirm your email first.")
+        phone.status = "APPROVED" if body.allow else "REFUSED"
+        phone.account_id = acc.id if body.allow else None
+        db.commit()
+        return {"ok": True, "status": phone.status}
     link = _pending(db, code)
     shop = db.get(Shop, link.shop_id)
     if not acc.email_verified:
