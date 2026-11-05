@@ -23,6 +23,8 @@ import { api } from '../lib/api';
 import CameraScanner from '../components/billing/CameraScanner';
 import MedicineSearchBox from '../components/shared/MedicineSearchBox';
 import MedicineBatchPanel from '../components/inventory/MedicineBatchPanel';
+import StockImportModal from '../components/inventory/StockImportModal';
+import { getUser } from '../lib/auth';
 import { formatDateOnly, getTodayIST } from '../lib/datetime';
 // Money / stock / margin formatting lives in lib so the batch panel shows the
 // exact same figures and margin colours as this page (see inventoryFormat.js).
@@ -4054,6 +4056,9 @@ export default function Inventory() {
   const [activeTab, setActiveTab]     = useState('products');
   const [suppliers, setSuppliers]     = useState([]);
   const [toast, setToast]             = useState(null);
+  const [showImport, setShowImport]   = useState(false);
+  const [reloadKey, setReloadKey]     = useState(0);     // bumps after an import so the list reloads
+  const canImport = ['Owner', 'Administrator'].includes(getUser()?.role_name);
 
   // Load lookup lists once on mount — they rarely change.
   // Categories are no longer fetched: the medicine form dropped the Category
@@ -4093,23 +4098,36 @@ export default function Inventory() {
       </p>
 
       {/* Tab switcher */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         {TABS.map((t) => (
           <button key={t.id} style={TAB_STYLE(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>
             {t.label}
           </button>
         ))}
+        {canImport && (
+          <button className="btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => setShowImport(true)}
+            title="Bring in the medicines and stock you already have, from an Excel file">
+            Import from Excel
+          </button>
+        )}
       </div>
 
       {/* Tab content */}
       {activeTab === 'products' && (
-        <ProductsTab suppliers={suppliers} showToast={showToast} />
+        <ProductsTab key={reloadKey} suppliers={suppliers} showToast={showToast} />
       )}
       {activeTab === 'add-stock' && (
         <BulkAddStockTab suppliers={suppliers} showToast={showToast} />
       )}
       {activeTab === 'history' && (
         <PurchaseHistoryTab />
+      )}
+
+      {showImport && (
+        <StockImportModal
+          onClose={() => setShowImport(false)}
+          onImported={() => { setReloadKey((k) => k + 1); setActiveTab('products'); }}
+        />
       )}
 
       {/* Toast */}

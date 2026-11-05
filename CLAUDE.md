@@ -787,6 +787,23 @@ Current stock of a product = SUM(quantity_available) across
   it needs a paid certificate; it will go in bundle.windows.signCommand.
   Guard: backend/scripts/test_updates.py
 
+**OPENING STOCK FROM EXCEL FOLLOWS THE ADD STOCK RULES - services/stock_import.py.**
+  Medicines -> Import from Excel (Owner/Admin).  OUR template only: one row per
+  BATCH; strip medicines in strips (+ loose tablets) with per-STRIP MRP/cost,
+  everything else in pieces.  The import converts to UNITS and per-unit prices
+  at 4 dp (a Rs 100 strip of 15 bills at exactly Rs 100.00), MRP includes GST,
+  cost is before GST.  /check judges every row and saves NOTHING; /import gets
+  the same file again, takes a manual_*.db backup, then saves the rows that
+  passed in one transaction.  Problem rows are skipped with a reason, never
+  guessed: expired, bad type/GST/expiry, a non-tablet "in strips", a batch
+  already in stock (so the same file twice cannot double stock; a blank batch
+  becomes OPEN-YYMM for the same reason).  An existing medicine (same name, any
+  case) gets the batch; its identity is never changed, and a different
+  tablets-per-strip is refused.  Opening stock writes StockMovement IN
+  (reference OPENING-IMPORT) and NO stock_purchases row or supplier credit -
+  it is not a delivery.  Schedule H1 is counted, never set (Register check).
+  Guard: backend/scripts/test_stock_import.py
+
 **THE OWNER APP'S FIGURES ARE LOCKED FOR THE OWNER'S PHONES ONLY - services/owner_app.py.**
   Decided Nov 2026: unlike backups (ARZ can open those, to restore a shop),
   nobody but the phones the shop PC approved can read a shop's sales - not the
@@ -1017,6 +1034,13 @@ POST   /api/cloud/backup-now        → 202; starts a round with a forced backup
                                       (Owner/Administrator).
 POST   /api/diagnostics/client-error → 204; a screen's crash.  No login, size-
                                       capped, 30/minute.
+
+### Opening stock import (Owner/Administrator)
+GET    /api/stock-import/template   → Curavo-opening-stock.xlsx (Medicines, How to fill, Example)
+POST   /api/stock-import/check      → multipart file -> {rows[{row, name, status ok|warning|error,
+                                      messages, summary}], counts}.  Saves nothing.
+POST   /api/stock-import/import     → the same file -> backup, then {medicines_added, batches_added,
+                                      units_added, skipped, maybe_schedule_h1, backup}
 
 ### Owner app (shop side; Owner/Administrator except the list)
 GET    /api/owner-app/devices       → {cloud_enabled, last_summary_at, max_phones,
